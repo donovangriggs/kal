@@ -77,7 +77,7 @@ Then run section 3 again.
 ## 6. End of the spec
 
 1. **Open Ticket 00:** run `kal-final .kal/runs/<feature>`. Ticket 00 is the whole integration branch: its branch and worktree are the integration branch's, and its base is the target. Every worker below takes `.kal/runs/<feature>/tickets/00-final.md` as its ticket.
-2. **Refine:** run a developer with `--model <yours>` and the note `mode: refine: call the Skill tool with "kal:refine-code" for the whole diff against the base (inside a kal build: no gates), and work through .kal/runs/<feature>/refine.md; tests green before and after; commit as refactor:`.
+2. **Refine:** run a developer with `--model <yours>` and the note `mode: refine: call the Skill tool with "kal:refine-code" for the whole diff against the base (inside a kal build: no gates), and work through .kal/runs/<feature>/refine.md; tests green before and after; commit as refactor:; finish with the full Verify via kal-verify`.
    - **STUCK:** run `kal-set` to log it, and go on without the refine: it's an improvement, not a gate.
 3. **Final checks**, all at once, at the same commit:
    - a **reviewer** with `--model <yours>` and the note `mode: final`

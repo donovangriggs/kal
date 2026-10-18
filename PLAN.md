@@ -168,7 +168,7 @@ size tier (from slice-tickets; at least "standard" if the ticket touches a secur
   others   → developer → reviewer | qa | security (parallel) → [bug-fixer] → merge
 ```
 
-1. **Developer** works in the ticket's worktree with `kal:red-green` at the seams the spec fixed, one vertical slice at a time. It runs Verify before reporting READY and saves the result against the head commit. Its brief lists the tickets in progress alongside it, so it stays inside its own scope.
+1. **Developer** works in the ticket's worktree with `kal:red-green` at the seams the spec fixed, one vertical slice at a time. It runs the tests covering what it changed (not the full suite) before reporting READY. The full Verify runs in QA, beside the review, and the merge reuses it. Its brief lists the tickets in progress alongside it, so it stays inside its own scope.
 2. **Checks run in parallel at the same commit:**
    - **reviewer** always runs.
    - **security** runs only when the diff touches auth, user input, database queries, file paths, external calls, crypto or secrets.
