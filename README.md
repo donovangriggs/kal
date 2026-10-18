@@ -12,7 +12,7 @@ A Claude Code plugin that plans a feature with you, then builds it while you're 
 
 ```sh
 # once per machine
-claude plugin marketplace add donovangriggs/kalistera
+claude plugin marketplace add donovangriggs/kal
 
 # once per repo
 cd your-repo

@@ -5,7 +5,7 @@
   "author": {
     "name": "Donovan Griggs"
   },
-  "repository": "https://github.com/donovangriggs/kalistera",
+  "repository": "https://github.com/donovangriggs/kal",
   "license": "MIT",
   "keywords": ["planning", "spec", "tdd", "code-review", "qa", "tmux", "agents"]
 }

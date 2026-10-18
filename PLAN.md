@@ -31,7 +31,7 @@ FINISH  refine-code → final review | standards | full browser QA → fixes
 ## 2. Install and setup
 
 ```sh
-claude plugin marketplace add donovangriggs/kalistera     # once per machine
+claude plugin marketplace add donovangriggs/kal     # once per machine
 claude plugin install kal@kal --scope project        # per repo
 /kal:setup                                           # per repo, inside Claude
 ```
@@ -316,7 +316,7 @@ Each milestone is usable on its own:
 
 - Milestone 5 (polish) is done:
   - `kal-doctor` exists, and `/kal:setup` was run end to end on a fresh repo (its Makefile-derived commands confirmed and committed).
-  - A real install was verified: `claude plugin marketplace add donovangriggs/kalistera` plus `claude plugin install kal@kal --scope project`, then a `/kal:build` with no `--plugin-dir` anywhere.
+  - A real install was verified: `claude plugin marketplace add donovangriggs/kal` plus `claude plugin install kal@kal --scope project`, then a `/kal:build` with no `--plugin-dir` anywhere.
   - The first dogfood run on a real project is left to the user.
 - Milestone 4 (the Board) is done: `bin/kal-board`, `board/state.py`, `board/index.html`. It was verified against real Runs, including a live worker's latest action.
 - Milestones 1 to 3 are done and verified live in tmux: `/kal:build` on one ticket (including STUCK, needs-you and resume from a retry note), and `/kal:build-spec` on a 3-ticket spec (parallel developers, a blocker releasing, the trivial fast path, the end of spec, the hand-off question, and merging to main with cleanup).
