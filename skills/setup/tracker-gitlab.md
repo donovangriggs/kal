@@ -27,6 +27,10 @@ Create a GitLab issue.
 
 Run `glab issue view <number> --comments`.
 
+## When a skill says "close the ticket"
+
+Post the explanation first (`glab issue note <number> --message "<what merged, and where>"`), then `glab issue close <number>`.
+
 ## Pathfinder operations
 
 Used by `/kal:pathfinder`. A **map** is one issue whose tickets are its **child** issues.

@@ -308,6 +308,6 @@ Each milestone is usable on its own:
 
 ## 15. To verify while building
 
-- Does `claude` have a CLI flag to start a session as a plugin agent (`--agent kal:developer`)? If not, the launcher reads the agent file and passes the model, the tools and the body as the brief.
+- ~~Can `claude` start a session as a plugin agent?~~ Yes: `claude --agent kal:<role>` (confirmed). AFK permissions use `--permission-mode dontAsk` plus an allowlist in the Worker's `--settings`.
 - Does a skill reference like `kal:red-green` resolve through the Skill tool inside worker sessions? (Confirmed in a headless `--plugin-dir` session; still to confirm in launcher-started workers.)
 - Do plugin-shipped hooks fire inside worker sessions started by the launcher, or only through the launcher's own `--settings`?

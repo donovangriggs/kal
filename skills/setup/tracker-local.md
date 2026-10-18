@@ -7,7 +7,7 @@ This repo's specs and tickets are markdown files under `.scratch/`.
 - One folder per feature: `.scratch/<feature-slug>/`.
 - The spec is `.scratch/<feature-slug>/spec.md`.
 - Tickets are one file each at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`. Never put several tickets in one file.
-- Each ticket has a `Status:` line near the top: `ready-for-agent` or `backlog` (builds track their own progress separately in `.kal/`).
+- Each ticket has a `Status:` line near the top: `ready-for-agent`, `backlog` or `done` (builds track their own progress separately in `.kal/`).
 - Comments and discussion are appended at the bottom of the file under `## Comments`.
 
 ## When a skill says "publish to the issue tracker"
@@ -17,6 +17,10 @@ Create a file under `.scratch/<feature-slug>/`, creating the folder if needed.
 ## When a skill says "fetch the ticket"
 
 Read the file at the given path. The user usually passes the path or the ticket number.
+
+## When a skill says "close the ticket"
+
+Set the ticket's `Status:` line to `done`, add one line under `## Comments` saying what merged and where, and commit only that file (`chore: close <NN>`).
 
 ## Pathfinder operations
 

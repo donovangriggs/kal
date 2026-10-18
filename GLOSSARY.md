@@ -44,7 +44,7 @@ One pass of a Ticket through development and checks. A Ticket gets at most two f
 The file a Worker writes for its Round, ending in a Verdict and the commit it applies to.
 
 **Verdict**:
-A Report's last word (READY, PASS, CHANGES, FIXED, STUCK, MERGED, NEEDS-HUMAN). It only counts for its own commit and Round.
+A Report's last word: READY or STUCK (developer), PASS or CHANGES (reviewer, qa, security), FIXED or STUCK (bug-fixer), MERGED, CONFLICT or RED (merger). It only counts for its own commit and Round.
 
 **Integration branch**:
 The branch every Ticket of a Run merges into before the final hand-off.

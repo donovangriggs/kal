@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""kal-worker ROLE <ticket file> [--model M] [--note TEXT ...] [--respawn] [--attach PANE]
+Run one Worker in its own tmux pane and block until it ends its turn.
+
+Prints "<pane id> <session id>" at launch, then "done" when the Worker ends its turn (or its claude exits),
+"stalled" when the watchdog killed it, or "blocked: ..." when it sat at a startup prompt (folder trust, MCP
+approval) that nobody would answer. The Orchestrator runs this as a background command: that notification is
+the Worker finishing. With --attach PANE it starts nothing and waits on that running Worker (a resumed Run).
+
+The Worker is `claude --agent kal:<role>`, started in the trusted main checkout (no folder-trust prompt) and told
+its worktree's absolute path. Its first message is the brief: pointers plus the shared rules, saved beside its
+report as <role>-brief.txt. Its settings (a temp file) carry:
+- a Stop hook that signals the tmux channel kal-done-<pane id> and closes the pane (tmux keeps a signal sent
+  before anyone waits);
+- the git guard (_kal_guard.py) as a PreToolUse hook on Bash;
+- permissions, run under --permission-mode dontAsk: any Bash command, file edits only in the worktree and Run
+  folder, no push. Anything else is denied instead of prompting, so an AFK Worker never blocks on a question.
+QA alone gets qa-mcp.json: chrome-devtools in --isolated mode (a throwaway Chrome per pane), killed with the pane.
+
+Watchdog: every KAL_WATCHDOG_TICK seconds (60) it checks the newest change among the Worker's transcript and its
+round folder. KAL_STALL_SECS (900) with no change, or KAL_MAX_SECS (3600) in all, kills the pane: "stalled".
+--respawn: the Role's last Worker crashed or stalled. Same round; the brief opens with a note. If this Role was
+already respawned in this round it prints "needs-human: ..." and exits 3.
+When the Ticket's last pane closes, Teardown runs in the worktree and the Ticket's port block is swept.
+"""
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROOT, Ticket, field, stop, teardown, worktrees
+
+NOTE = "A previous attempt at this step crashed or stalled. Read the branch and this round's reports first."
+GUARD = ROOT / "bin" / "_kal_guard.py"
+VERIFY = ROOT / "bin" / "kal-verify"
+STOP_HOOK = 'tmux wait-for -S "kal-done-$TMUX_PANE"; tmux kill-pane -t "$TMUX_PANE"'
+# Any Bash command: a per-command allowlist proved brittle (compound commands, variables and $(...) can't be
+# matched, and a Worker that hits one denial tends to give up on Bash). The hard lines are the git guard hook and
+# the push deny. File-edit tools may write only in the worktree and the Run folder.
+TOOLS = ["Read", "Glob", "Grep", "Skill", "TodoWrite", "WebFetch", "WebSearch", "Bash"]
+
+
+def tmux(*args):
+    return subprocess.run(["tmux", *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def last_change(sid, folder):
+    """Newest mtime among the session's transcript and the round folder's files (0 if none exist yet)."""
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    paths = [*cfg.glob(f"projects/*/{sid}.jsonl"), folder]
+    paths += [Path(d, f) for d, _, files in os.walk(folder) for f in files]
+    return max((f.stat().st_mtime for f in paths if f.exists()), default=0)
+
+
+def plugin_flags(repo):
+    """--plugin-dir for this checkout of kal, unless kal is installed for the repo (enabledPlugins in user,
+    project or local settings; the later file wins). Lets a dev checkout run Workers without installing it."""
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    enabled = False
+    for f in (cfg / "settings.json", repo / ".claude" / "settings.json", repo / ".claude" / "settings.local.json"):
+        try:
+            plugins = json.loads(f.read_text()).get("enabledPlugins", {})
+        except (OSError, ValueError):
+            continue
+        for key, on in plugins.items():
+            if key.split("@")[0] == "kal":
+                enabled = bool(on)
+    return [] if enabled else ["--plugin-dir", str(ROOT)]
+
+
+def brief(t, role, notes, port, respawn):
+    k = t.round
+    previous = [str(t.round_dir(i)) for i in range(1, k) if t.round_dir(i).is_dir()]
+    siblings = [f"{p.name.split('-')[0]} {field('Status', p.read_text())}" for p in sorted(t.path.parent.glob("*.md"))
+                if p != t.path and field("Status", p.read_text()) in ("in-dev", "in-review", "fixing")]
+    base_wt = worktrees(t.repo).get(t.base, str(t.repo))
+    spec = t.run_dir / "spec.md"
+    lines = [
+        f"# kal worker: {role}, ticket {t.nn} \"{t.title}\", round {k}", "",
+        *( [NOTE, ""] if respawn else []),
+        "You are one Worker in a kal Run, running unattended in this tmux pane. Nobody is watching it.", "",
+        "## Pointers (read the files; this brief doesn't copy them)", "",
+        f"- Spec: {spec if spec.is_file() else 'none: the Ticket is the requirement'}",
+        f"- Ticket: {t.path}",
+        f"- Round folder: {t.round_dir()}",
+        f"- Previous round folders: {', '.join(previous) or 'none'}",
+        f"- Your report: {t.round_dir() / (REPORT[role] + '.md')}",
+        f"- Worktree: {t.worktree}",
+        f"- Branch: {t.branch}",
+        f"- Base branch: {t.base} (checked out at {base_wt})",
+        f"- Port: {port} (bind every server to 127.0.0.1; `{{port}}` in the Commands block means this)",
+        *( [f"- Baseline worktree: {base_wt}", f"- Baseline port: {t.block + QA_BASELINE}"] if role == "qa" else []),
+        f"- Tickets in progress alongside you: {', '.join(siblings) or 'none'}",
+        f"- Notes from the orchestrator: {' / '.join(notes) or 'none'}", "",
+        "## Rules", "",
+        f"1. Work only in the worktree, by absolute path (`git -C {t.worktree} ...`, absolute file paths). Never edit "
+        "the main checkout, the spec or the Ticket file. The only file you write outside the worktree is your report "
+        "(and screenshots, for QA, in the round folder).",
+        "2. Never ask a question: nobody will answer. Decide, and write the assumption in your report. Follow any "
+        "notes under `## Comments` in the Ticket: they are the human's.",
+        f"3. The repo's commands are in the `## Commands` block of `{t.worktree}/CLAUDE.md`. Run the full Verify only "
+        f"as `{VERIFY} {t.worktree} {t.round_dir()}`: it takes the repo's one test slot and reuses a passing log for an "
+        "unchanged commit.",
+        "4. Destructive git is blocked (stash, reset --hard, clean, checkout --/./-f, restore, switch -f, branch -D, "
+        "commit --amend, push): other worktrees share this .git. Stage files by name. Never push.",
+        "5. Start no subagents and no background commands: your turn ending closes this pane at once, and anything "
+        "still running is lost. When a skill says to do something in a subagent or in parallel, do it yourself, in turn.",
+        "6. Any Bash command is allowed except destructive git and push. File edits are allowed only in the worktree "
+        "and the Run folder. A denial applies to that one call, not to the whole tool: adjust that call and carry on.",
+        f"7. Write your report to the path above. Its last two lines are exactly `Verdict: <WORD>` and "
+        f"`At: <full sha of git -C {t.worktree} rev-parse HEAD>`. Then end your turn: that closes this pane and tells "
+        "the orchestrator you're done. A report without a Verdict line counts as a crash.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def settings(role, t):
+    # `//` = an absolute path; a single `/` would be relative to this temp settings file.
+    allow = TOOLS + [f"{tool}(/{d}/**)" for d in (t.worktree, t.run_dir) for tool in ("Edit", "Write")]
+    if role == "qa":
+        allow.append("mcp__chrome-devtools")
+    return {"permissions": {"allow": sorted(set(allow)), "deny": ["Bash(git push *)", "Bash(git push)"]},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": STOP_HOOK}]}],
+                      "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command",
+                                                                     "command": shlex.quote(str(GUARD))}]}]}}
+
+
+p = argparse.ArgumentParser(prog="kal-worker")
+p.add_argument("role", choices=REPORT)
+p.add_argument("ticket", type=Path)
+p.add_argument("--model")
+p.add_argument("--note", action="append", default=[])
+p.add_argument("--respawn", action="store_true")
+p.add_argument("--attach", metavar="PANE")
+a = p.parse_args()
+if not os.environ.get("TMUX_PANE"):
+    stop(1, "kal-worker: not inside tmux (no TMUX_PANE)")
+if not a.ticket.is_file():
+    stop(2, f"kal-worker: no ticket file {a.ticket}")
+t = Ticket(a.ticket)
+folder = t.round_dir()
+folder.mkdir(parents=True, exist_ok=True)
+port = t.block + PORT_OFFSET[a.role]
+brief_file = folder / f"{a.role}-brief.txt"
+title = f"{t.nn} {a.role}"
+sid = str(uuid.uuid4())
+tmp = Path(tempfile.mkdtemp(prefix="kal-worker-"))
+
+
+def show(pane, fmt):
+    """`fmt` expanded for a pane; empty once the pane is gone."""
+    return subprocess.run(["tmux", "display", "-p", "-t", pane, fmt], capture_output=True, text=True).stdout.strip()
+
+
+if a.attach:  # the Worker runs already; its session id (for the watchdog) is in its pane's start command
+    pane = a.attach
+    found = re.search(r"--session-id (\S+)", show(pane, "#{pane_start_command}"))
+    sid = found[1] if found else sid
+    title = show(pane, "#{pane_title}") or title
+else:
+    if a.respawn and brief_file.is_file() and NOTE in brief_file.read_text():
+        stop(3, f"needs-human: {a.role} crashed or stalled twice in round {t.round}, see {folder}")
+    (folder / (REPORT[a.role] + ".md")).unlink(missing_ok=True)
+    brief_file.write_text(brief(t, a.role, a.note, port, a.respawn))
+    (tmp / "settings.json").write_text(json.dumps(settings(a.role, t), indent=1))
+    mcp = ["--strict-mcp-config"]  # only the servers kal passes: a project's MCP approval prompt would block AFK
+    if a.role == "qa":
+        servers = json.loads((ROOT / "qa-mcp.json").read_text())
+        for srv in servers["mcpServers"].values():
+            srv["args"] = [*srv.get("args", []), f"--chromeArg=--kal-qa={sid}"]
+        (tmp / "mcp.json").write_text(json.dumps(servers))
+        mcp += ["--mcp-config", str(tmp / "mcp.json")]
+    claude = [shutil.which("claude") or "claude", "--agent", f"kal:{a.role}", *(["--model", a.model] if a.model else []),
+              "--permission-mode", "dontAsk", "--session-id", sid, "--settings", str(tmp / "settings.json"),
+              "--add-dir", t.worktree, "--add-dir", str(t.run_dir), "-n", f"kal {title}", *plugin_flags(t.repo), *mcp]
+    # The pane gets the tmux server's env, not ours: pass what claude needs. `--` ends the variadic flags before
+    # the prompt. If claude dies without its Stop hook, the shell still signals.
+    cmd = f'{shlex.join(claude)} -- "$(cat {shlex.quote(str(brief_file))})"; tmux wait-for -S "kal-done-$TMUX_PANE"'
+    env = {"PATH": os.environ["PATH"], "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        env["CLAUDE_CONFIG_DIR"] = os.environ["CLAUDE_CONFIG_DIR"]
+    pane = tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", os.environ["TMUX_PANE"], "-c", str(t.repo),
+                *(x for k, v in env.items() for x in ("-e", f"{k}={v}")), "sh", "-c", cmd)
+    tmux("select-pane", "-t", pane, "-T", title)
+    tmux("set-option", "-w", "-t", pane, "pane-border-status", "top")
+    # The Orchestrator's pane (the window's first) on the left, the Workers stacked on the right.
+    tmux("set-option", "-w", "-t", pane, "main-pane-width", "50%")
+    tmux("select-layout", "-t", pane, "main-vertical")
+print(pane, sid, flush=True)
+
+
+def alive():
+    """The pane is still open. Its title guards against a pane id reused by a restarted tmux."""
+    return show(pane, "#{pane_id} #{pane_title}") == f"{pane} {title}"
+
+
+tick, stall_secs, max_secs = (float(os.environ.get(k, d)) for k, d in
+                              [("KAL_WATCHDOG_TICK", 60), ("KAL_STALL_SECS", 900), ("KAL_MAX_SECS", 3600)])
+# ponytail: an attached waiter counts KAL_MAX_SECS from attaching, not from the Worker's start.
+start = time.time()
+result = "done"
+PROMPT_SECS = float(os.environ.get("KAL_PROMPT_SECS", 45))
+
+
+def startup_prompt():
+    """The dialog text if the Worker sits at a startup prompt (folder trust, MCP approval, ...) before its first
+    turn: nobody will answer it, so fail now instead of after the stall timeout."""
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    if any(cfg.glob(f"projects/*/{sid}.jsonl")):
+        return None
+    screen = subprocess.run(["tmux", "capture-pane", "-p", "-t", pane], capture_output=True, text=True).stdout
+    if "Enter to confirm" not in screen:
+        return None
+    return next((l.strip() for l in screen.splitlines() if l.strip() and not set(l.strip()) <= set("─ ")), "a prompt")
+
+
+waiter = subprocess.Popen(["tmux", "wait-for", f"kal-done-{pane}"])
+while alive():  # a pane gone with no signal for us (another waiter took it, or it was killed) is done too
+    try:
+        waiter.wait(timeout=tick)
+        break
+    except subprocess.TimeoutExpired:
+        now = time.time()
+        blocked = startup_prompt() if now - start > PROMPT_SECS and not a.attach else None
+        if blocked:
+            result = f"blocked: the Worker is stuck at a startup prompt ({blocked})"
+            waiter.kill()
+            subprocess.run(["tmux", "kill-pane", "-t", pane], capture_output=True)
+            break
+        if now - max(start, last_change(sid, folder)) > stall_secs or now - start > max_secs:
+            result = "stalled"
+            waiter.kill()
+            subprocess.run(["tmux", "kill-pane", "-t", pane], capture_output=True)
+            break
+waiter.kill()
+if a.role == "qa":  # QA's browser and MCP server go with its pane (KILL only after 2s of TERM)
+    tag = f"kal-qa={sid}"
+    subprocess.run(["pkill", "-f", tag])
+    for _ in range(20):
+        if subprocess.run(["pgrep", "-f", tag], capture_output=True).returncode:
+            break
+        time.sleep(0.1)
+    subprocess.run(["pkill", "-KILL", "-f", tag])
+# ponytail: two Workers of a Ticket ending in the same instant can each see the other and both skip teardown;
+# kal-merge tears down again. A per-Ticket counter if leaks show up.
+others = tmux("list-panes", "-t", os.environ["TMUX_PANE"], "-F", "#{pane_id} #{pane_title}").splitlines()
+if not any(l.split(" ", 1)[1].startswith(f"{t.nn} ") for l in others if " " in l and l.split(" ", 1)[0] != pane):
+    teardown(t.worktree, t.block)
+shutil.rmtree(tmp, ignore_errors=True)
+print(result)

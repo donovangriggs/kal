@@ -1,0 +1,165 @@
+"""Helpers shared by the Python kal-* commands. A script imports it from its own folder (`from _kal import ...`):
+Python puts a script's folder first on sys.path. The leading underscore keeps it off the kal-* command space."""
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent  # the plugin root (CLAUDE_PLUGIN_ROOT isn't set on the Bash PATH)
+
+# Role -> its report's file name (without .md) in the round folder.
+REPORT = {"developer": "dev", "reviewer": "review", "qa": "qa", "security": "security",
+          "bug-fixer": "fix", "merger": "merge"}
+CHECKS = ("reviewer", "qa", "security")
+
+# Each Role's dev-server port as an offset in the Ticket's block, so Roles running side by side never collide.
+PORT_OFFSET = {"developer": 0, "bug-fixer": 0, "qa": 1, "reviewer": 2, "security": 3, "merger": 3}
+QA_BASELINE = 4  # QA's spare: a baseline server from the base branch's checkout
+COMMAND_KEYS = ("Verify", "Dev server", "Teardown", "Worktree setup")
+
+
+def run(*cmd, cwd):
+    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
+
+
+def git(*args, cwd):
+    return run("git", *args, cwd=cwd).stdout.strip()
+
+
+def stop(code, msg):
+    print(msg)
+    sys.exit(code)
+
+
+def _lines(key, text):
+    return re.findall(rf"^(?:\*\*)?{re.escape(key)}:(?:\*\*)?[ \t]*(.*?)[ \t]*$", text, re.M)
+
+
+def field(key, text):
+    """A header line `Key: value` (plain or bold) of a Ticket or Run file; None if absent. Only the header counts
+    (the text before the first `## ` heading), and the first match wins."""
+    found = _lines(key, re.split(r"^## ", text, maxsplit=1, flags=re.M)[0])
+    return found[0] if found else None
+
+
+def report_field(key, text):
+    """A report's last `Key: value` line (`Verdict:`, `At:`), anywhere in it; None if absent."""
+    found = _lines(key, text)
+    return found[-1] if found else None
+
+
+def commands(checkout):
+    """The `## Commands` block of <checkout>/CLAUDE.md as {key: command}; `none`, `TODO` or missing -> None."""
+    md = Path(checkout) / "CLAUDE.md"
+    text = md.read_text() if md.is_file() else ""
+    out = {}
+    for key in COMMAND_KEYS:
+        m = re.search(rf"^- {re.escape(key)}[^`\n]*`([^`]+)`", text, re.M)
+        cmd = m[1].strip() if m else ""
+        out[key] = None if cmd.lower() in ("", "none", "todo") else cmd
+    return out
+
+
+def repo_of(path):
+    """The main checkout that owns `path` (works from any worktree)."""
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path)
+    return Path(common).parent if common else None
+
+
+class Ticket:
+    """A Ticket mirror at <repo>/.kal/runs/<feature>/tickets/NN-<slug>.md and everything derived from it."""
+
+    def __init__(self, path):
+        self.path = Path(path).resolve()
+        self.text = self.path.read_text()
+        self.nn = self.path.name.split("-")[0]
+        self.run_dir = self.path.parent.parent
+        self.feature = self.run_dir.name
+        self.repo = self.run_dir.parent.parent.parent
+        self.run_md = self.run_dir / "run.md"
+        title = re.search(r"^# (?:\d+:\s*)?(.*)$", self.text, re.M)
+        self.title = title[1].strip() if title else self.nn
+        self.round = int(field("Round", self.text) or 0) or 1
+        self.branch = field("Branch", self.text) or f"kal/{self.feature}-{self.nn}"
+        self.worktree = field("Worktree", self.text) or str(self.repo.parent / f"{self.repo.name}-kal" /
+                                                            f"{self.feature}-{self.nn}")
+        run_text = self.run_md.read_text() if self.run_md.exists() else ""
+        self.base = field("Base branch", run_text)
+        self.block = 5100 + 10 * int(self.nn)
+
+    def round_dir(self, k=None):
+        return self.run_dir / "reports" / self.nn / f"round-{k or self.round}"
+
+    def reports(self, role):
+        """Every report this Role wrote for the Ticket, oldest round first: [(round, path)]."""
+        name = REPORT[role] + ".md"
+        found = []
+        for d in (self.run_dir / "reports" / self.nn).glob("round-*"):
+            if (d / name).is_file() and d.name[6:].isdigit():
+                found.append((int(d.name[6:]), d / name))
+        return sorted(found)
+
+
+def worktrees(repo):
+    """{branch: worktree path} for every worktree of the repo, from git (the truth, not the Ticket's lines)."""
+    out = {}
+    for block in git("worktree", "list", "--porcelain", cwd=repo).split("\n\n"):
+        wt = re.search(r"^worktree (.*)$", block, re.M)
+        ref = re.search(r"^branch refs/heads/(.*)$", block, re.M)
+        if wt and ref:
+            out[ref[1]] = wt[1]
+    return out
+
+
+def dirty(checkout):
+    """Uncommitted paths in a checkout, ignoring kal's run folder and the local tracker's folder."""
+    out = run("git", "status", "--porcelain", "--", ".", ":(exclude).kal", ":(exclude).scratch", cwd=checkout)
+    return [l[3:] for l in out.stdout.splitlines()]
+
+
+def covers(at, head, base, cwd):
+    """A PASS at `at` still holds for `head`: it is the head, or every commit after it that `base` lacks is a
+    clean automatic merge (its tree is exactly what `git merge-tree` makes of its two parents, no conflict).
+    A hand-resolved merge, or any other commit, brings in content nobody checked."""
+    at = git("rev-parse", "--verify", "-q", f"{at}^{{commit}}", cwd=cwd)
+    if not at or run("git", "merge-base", "--is-ancestor", at, head, cwd=cwd).returncode:
+        return False
+    for line in git("rev-list", "--parents", f"{at}..{head}", f"^{base}", cwd=cwd).splitlines():
+        sha, *parents = line.split()
+        merged = run("git", "merge-tree", "--write-tree", *parents, cwd=cwd) if len(parents) == 2 else None
+        if not merged or merged.returncode or merged.stdout.split()[0] != git("rev-parse", f"{sha}^{{tree}}", cwd=cwd):
+            return False
+    return True
+
+
+def teardown(worktree, port):
+    """Run the Commands block's Teardown in the worktree, once per Role port when it names {port}, then kill
+    whatever still listens on the port block (port to port+9)."""
+    cmd = commands(worktree)["Teardown"] if Path(worktree).is_dir() else None
+    if cmd:
+        offsets = sorted({*PORT_OFFSET.values(), QA_BASELINE}) if "{port}" in cmd else [0]
+        for off in offsets:
+            try:
+                subprocess.run(["sh", "-c", cmd.replace("{port}", str(port + off))], cwd=worktree, timeout=300,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except subprocess.TimeoutExpired:
+                pass
+    for sig in (signal.SIGTERM, signal.SIGKILL):  # KILL only what ignored TERM for 2s
+        for pid in listeners(port):
+            try:
+                os.kill(int(pid), sig)
+            except ProcessLookupError:
+                pass
+        for _ in range(20):
+            if not listeners(port):
+                return
+            time.sleep(0.1)
+
+
+def listeners(port):
+    """Pids listening on the port block, on any address (a dev server may bind *, ::1 or 127.0.0.1)."""
+    return subprocess.run(["lsof", "-t", "-n", "-P", f"-iTCP:{port}-{port + 9}", "-sTCP:LISTEN"],
+                          capture_output=True, text=True).stdout.split()

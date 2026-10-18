@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""kal-merge <ticket file>: merge one approved Ticket into the Run's base branch, then clean it up.
+
+The gate: the reviewer's latest report must be a PASS, and so must the latest report of every other check that
+ran (qa, security), at a commit that is in the branch. Only the checks that failed run again after a fix round,
+so an earlier PASS stands for later commits. Then the base tip is merged into the branch, Verify runs once on that
+exact commit, and that commit is merged --no-ff into the base branch's checkout.
+
+Exit 0 merged; 2 a worktree is missing or not clean; 3 a required report isn't a PASS; 4 the base tip conflicts
+with the branch (merge aborted, branch unchanged); 5 Verify failed (RED); 6 the merge into the base failed
+(aborted). Every exit prints one line saying what happened.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+from _kal import CHECKS, Ticket, dirty, git, report_field, run, stop, teardown, worktrees
+
+HERE = Path(__file__).resolve().parent
+
+if len(sys.argv) != 2 or not Path(sys.argv[1]).is_file():
+    stop(2, "usage: kal-merge <ticket file>")
+t = Ticket(sys.argv[1])
+trees = worktrees(t.repo)
+for b in (t.base, t.branch):
+    if b not in trees:
+        stop(2, f"no worktree has {b} checked out")
+    changed = dirty(trees[b])
+    if changed:
+        stop(2, f"the worktree of {b} ({trees[b]}) is not clean: {', '.join(changed[:5])}")
+base_wt, wt = trees[t.base], trees[t.branch]
+head = git("rev-parse", t.branch, cwd=t.repo)
+
+for role in CHECKS:
+    reports = t.reports(role)
+    if not reports:
+        if role == "reviewer":
+            stop(3, f"no reviewer report for {t.nn}; not merged")
+        continue
+    k, path = reports[-1]
+    body = path.read_text()
+    verdict, at = report_field("Verdict", body), report_field("At", body)
+    if verdict != "PASS":
+        stop(3, f"round-{k}/{path.name} is {verdict or 'missing its Verdict'}; not merged")
+    # ponytail: a check that passed in an earlier round isn't re-run after later fix rounds (only the failed
+    # checks are); its PASS holds if its commit is an ancestor of the head. The final review re-checks it all.
+    if not at or run("git", "merge-base", "--is-ancestor", at, head, cwd=t.repo).returncode:
+        stop(3, f"round-{k}/{path.name} is a PASS at {at or '?'}, which isn't in {t.branch}; not merged")
+
+if run("git", "merge-base", "--is-ancestor", t.base, t.branch, cwd=t.repo).returncode:
+    if run("git", "merge", "--no-edit", t.base, cwd=wt).returncode:
+        run("git", "merge", "--abort", cwd=wt)
+        stop(4, f"{t.base} conflicts with {t.branch}; merge aborted, branch unchanged")
+
+verified = git("rev-parse", "HEAD", cwd=wt)
+v = subprocess.run([str(HERE / "kal-verify"), wt, str(t.round_dir())], text=True, stdout=subprocess.PIPE)
+if v.returncode:
+    stop(5, f"RED: Verify failed on {verified[:7]}, not merged: {v.stdout.strip()}")
+
+# Merge the verified sha, not the branch name, so only the tree Verify saw can land.
+if run("git", "merge", "--no-ff", verified, "-m", f"Merge {t.nn}: {t.title}", cwd=base_wt).returncode:
+    run("git", "merge", "--abort", cwd=base_wt)
+    stop(6, f"merging {t.branch} into {t.base} failed; aborted")
+tip = git("rev-parse", "--short", "HEAD", cwd=base_wt)
+
+notes = []
+teardown(wt, t.block)  # first: its stack may hold files the worktree removal needs
+# --force: the tree was clean and is now merged; only Verify/Teardown leftovers can remain.
+if run("git", "worktree", "remove", "--force", wt, cwd=base_wt).returncode:
+    notes.append(f"worktree {wt} not removed")
+if run("git", "branch", "-d", t.branch, cwd=base_wt).returncode:  # from base_wt: merged into its HEAD
+    notes.append(f"branch {t.branch} not deleted")
+
+subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log", f"merged into {t.base} at {tip}"])
+print(f"merged {t.nn} into {t.base} at {tip}" + "".join(f"; {n}" for n in notes))

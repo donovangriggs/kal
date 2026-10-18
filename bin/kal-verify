@@ -1,0 +1,73 @@
+#!/bin/sh
+# kal-verify <worktree> <log-dir>
+# Runs the repo's Verify command (CLAUDE.md "- Verify: `cmd`") in <worktree> and writes
+# <log-dir>/verify-<short sha>.log. Exits with Verify's exit code (2: usage or no Verify command).
+# Reuse: a pass is recorded per commit in the git common dir, so any worktree or Run can reuse it.
+[ $# -eq 2 ] || { echo "usage: kal-verify <worktree> <log-dir>" >&2; exit 2; }
+wt=$(cd "$1" && pwd) || exit 2
+cmd=$(sed -n 's/^- Verify[^`]*`\([^`]*\)`.*/\1/p' "$wt/CLAUDE.md" 2>/dev/null | head -n 1)
+[ -n "$cmd" ] || { echo "kal-verify: no '- Verify: \`cmd\`' line in $wt/CLAUDE.md" >&2; exit 2; }
+head=$(git -C "$wt" rev-parse HEAD) || exit 2
+short=$(git -C "$wt" rev-parse --short HEAD)
+mkdir -p "$2" || exit 2
+log=$(cd "$2" && pwd)/verify-$short.log
+dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
+
+# Every pass from a clean tree, one commit per line, shared by every worktree and Run (see the reuse below).
+passed=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/kal-verify-passed
+
+# Reuse a passing log for this exact commit, verified from a clean tree. Recorded in the store if it isn't yet
+# (logged before the store existed), so later commits with the same tree can reuse it too.
+if [ "$dirty" = 0 ] && [ "$(head -n 2 "$log" 2>/dev/null)" = "commit $head
+dirty files: 0" ] && [ "$(tail -n 1 "$log")" = "kal-verify: exit 0" ]; then
+  grep -qx "$head" "$passed" 2>/dev/null || echo "$head" >> "$passed"
+  echo "PASS (reused) $log"; exit 0
+fi
+
+# Reuse a pass of another commit whose tree differs from HEAD only under .scratch/ or .kal/ (tracker and run files): a --no-ff merge
+# of a verified branch, a Ticket-only commit on main. Passes are recorded in the git common dir, so this works
+# across worktrees, log dirs and Runs. The reused log gets HEAD's own log, so the check above finds it next time.
+if [ "$dirty" = 0 ] && [ -f "$passed" ]; then
+  # ponytail: .scratch/ is the local tracker's folder; make it a setting if a repo keeps Tickets elsewhere.
+  for sha in $(tail -n 50 "$passed"); do
+    if git -C "$wt" cat-file -e "$sha^{commit}" 2>/dev/null &&
+      git -C "$wt" diff --quiet "$sha" "$head" -- . ':(exclude).scratch' ':(exclude).kal'; then
+      { echo "commit $head"; echo "dirty files: 0"; echo "reused: Verify passed at $sha, and only .scratch/ or .kal/ changed since"
+        echo "kal-verify: exit 0"; } > "$log"
+      echo "PASS (reused) $log"; exit 0
+    fi
+  done
+fi
+
+# One global slot per repo: a lock directory in the git common dir, shared by every worktree.
+lock=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/kal-verify.lock
+# Touch the log every second, from now until Verify ends, so the Worker watchdog sees progress
+# while we wait for the slot and while a quiet suite runs. Stops by itself if we die.
+(while kill -0 $$ 2>/dev/null; do touch "$log"; sleep 1; done) </dev/null >/dev/null 2>&1 &
+toucher=$!
+trap 'kill $toucher 2>/dev/null' EXIT
+trap 'exit 143' INT TERM HUP
+empty=0
+until mkdir "$lock" 2>/dev/null; do
+  pid=$(cat "$lock/pid" 2>/dev/null)
+  # Empty pid: the holder is between mkdir and writing it, so treat it as alive, but only for 5 polls:
+  # a holder that died in between left it empty for good.
+  # ponytail: two waiters reaping the same dead pid can race (one may remove the other's fresh
+  # lock, so two Verifys overlap once); fine at a 3-Developer cap, use flock(1) if it bites.
+  if [ -z "$pid" ]; then empty=$((empty + 1)); else empty=0; fi
+  if [ "$empty" -ge 5 ] || { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; }; then
+    rm -rf "$lock"; empty=0; continue
+  fi
+  sleep 1
+done
+trap 'kill $toucher 2>/dev/null; rm -rf "$lock"' EXIT
+echo $$ > "$lock/pid"
+
+{ echo "commit $head"; echo "dirty files: $dirty"; } > "$log"
+# RTK_DISABLED: rtk compresses test output and hides failures.
+(cd "$wt" && RTK_DISABLED=1 sh -c "$cmd") >> "$log" 2>&1
+rc=$?
+echo "kal-verify: exit $rc" >> "$log"
+[ $rc -eq 0 ] && [ "$dirty" = 0 ] && echo "$head" >> "$passed"
+if [ $rc -eq 0 ]; then echo "PASS $log"; else tail -n 40 "$log" >&2; echo "FAIL $log"; fi
+exit $rc

@@ -27,6 +27,10 @@ Create a GitHub issue.
 
 Read it as in **Read** above.
 
+## When a skill says "close the ticket"
+
+`gh issue close <number> --comment "<what merged, and where>"`.
+
 ## Pathfinder operations
 
 Used by `/kal:pathfinder`. A **map** is one issue whose tickets are its **child** issues.

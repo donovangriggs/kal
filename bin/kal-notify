@@ -1,0 +1,12 @@
+#!/bin/sh
+# kal-notify MESSAGE: a macOS notification titled "kal", plus a terminal bell in the caller's tmux pane.
+# The Orchestrator sends them when a Run finishes, needs the human, or its final review fails.
+# MESSAGE goes to osascript as an argument, never as script text. Tests put a fake `osascript` first on PATH.
+[ $# -eq 1 ] || { echo "usage: kal-notify MESSAGE" >&2; exit 2; }
+osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "kal"' -e 'end run' \
+  "$1" >/dev/null 2>&1
+if [ -n "$TMUX_PANE" ]; then
+  tty=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null)
+  [ -n "$tty" ] && printf '\a' > "$tty" 2>/dev/null
+fi
+exit 0
