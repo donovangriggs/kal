@@ -5,6 +5,7 @@ import sys
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -50,6 +51,7 @@ class Guard(unittest.TestCase):
 class Repo(unittest.TestCase):
     """A main checkout on `main` with kal's setup done: docs/agents/, a Commands block, .kal/ ignored."""
     verify = "true"
+    quick = None
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="kal-test-"))
@@ -60,7 +62,8 @@ class Repo(unittest.TestCase):
         (self.repo / "docs" / "agents" / "issue-tracker.md").write_text("local\n")
         (self.repo / ".gitignore").write_text(".kal/\n")
         (self.repo / "CLAUDE.md").write_text(
-            f"# app\n\n## Commands\n\n- Verify: `{self.verify}`\n- Dev server: `none`\n- Teardown: `none`\n"
+            f"# app\n\n## Commands\n\n- Verify: `{self.verify}`\n" + (f"- Quick check: `{self.quick}`\n" if self.quick else "") +
+            "- Dev server: `none`\n- Teardown: `none`\n"
             "- Worktree setup: `none`\n")
         (self.repo / "loans.txt").write_text("renew\n")
         sh("git", "add", "-A", cwd=self.repo)
@@ -438,3 +441,81 @@ class Loaded(unittest.TestCase):
         self.install(scope="user")
         self.enable(False)
         self.assertFalse(self.loaded(self.repo))
+
+
+class Quick(Repo):
+    quick = "echo quick-ran"
+
+    def test_quick_check_runs_its_own_command_and_reuses(self):
+        logs = self.tmp / "logs"
+        r = kal("kal-verify", "--quick", str(self.repo), str(logs), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        log = next(logs.glob("quick-*.log"))
+        self.assertIn("quick-ran", log.read_text())
+        self.assertIn("reused", kal("kal-verify", "--quick", str(self.repo), str(logs), cwd=self.repo).stdout)
+        self.assertFalse(list(logs.glob("verify-*.log")))
+
+    def test_quick_check_takes_no_slot(self):
+        holder = subprocess.Popen(["sleep", "30"])
+        common = sh("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=self.repo).stdout.strip()
+        lock = Path(common) / "kal-verify.lock"
+        lock.mkdir()
+        (lock / "pid").write_text(str(holder.pid))
+        try:
+            start = time.time()
+            r = kal("kal-verify", "--quick", str(self.repo), str(self.tmp / "logs"), cwd=self.repo)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            self.assertLess(time.time() - start, 5)
+        finally:
+            holder.kill()
+
+
+class NoQuick(Repo):
+    def test_quick_without_a_quick_check_exits_2(self):
+        self.assertEqual(kal("kal-verify", "--quick", str(self.repo), str(self.tmp / "l"), cwd=self.repo).returncode, 2)
+
+
+class Settle(Repo):
+    def test_merge_waits_for_the_tickets_workers_to_exit(self):
+        t, wt = self.started()
+        head = self.commit(wt, "renew.txt", "ok\n")
+        self.report(t, "review.md", "PASS", head)
+        fake = subprocess.Popen(["python3", "-c", "import time; time.sleep(3)", "kal-worker", "qa", str(t)])
+        start = time.time()
+        r = kal("kal-merge", str(t), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertGreater(time.time() - start, 2)
+        fake.wait()
+
+    def test_a_merge_that_already_landed_just_finishes(self):
+        t, wt = self.started()
+        head = self.commit(wt, "renew.txt", "ok\n")
+        sh("git", "merge", "--no-ff", head, "-m", "Merge 01: Renew a loan", cwd=self.repo)
+        r = kal("kal-merge", str(t), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("already landed", r.stdout)
+        self.assertFalse(wt.exists())
+        self.assertEqual(self.text(t, "Status"), "merged")
+
+
+class Brief(Repo):
+    def test_only_testing_roles_get_the_verify_rule(self):
+        src = (BIN / "kal-worker").read_text().split("\np = argparse")[0]
+        g = {"__name__": "kal_worker_test"}
+        sys.path.insert(0, str(BIN))
+        exec(src, g)
+        kal("kal-start", str(self.run_dir), cwd=self.repo)
+        from _kal import Ticket
+        t = Ticket(self.ticket())
+        self.assertIn("Don't run Verify", g["testing_rule"]("reviewer", t))
+        self.assertIn("Don't run Verify", g["testing_rule"]("security", t))
+        self.assertIn("--quick", g["testing_rule"]("qa", t))
+        self.assertIn("full Verify only when", g["testing_rule"]("developer", t))
+
+
+class MergingIsLive(SpecRepo):
+    def test_a_running_merge_keeps_the_run_out_of_idle(self):
+        self.start_spec()
+        self.mirror("01", status="merged")
+        self.mirror("02", status="merging")
+        self.assertEqual(self.next(), [])

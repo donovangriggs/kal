@@ -69,6 +69,23 @@ def plugin_flags(repo):
     return [] if kal_loaded(repo) else ["--plugin-dir", str(ROOT)]
 
 
+def testing_rule(role, t):
+    """Rule 3 of the brief: who runs which checks. The full Verify is the merge's gate, so it runs as rarely as
+    possible; the reviewer and security read code and never queue for the test slot."""
+    where = f"The repo's commands are in the `## Commands` block of `{t.worktree}/CLAUDE.md`."
+    full = (f"the full Verify only as `{VERIFY} {t.worktree} {t.round_dir()}` (it takes the repo's one test slot "
+            "and reuses a passing log for an unchanged commit)")
+    quick = f"the Quick check, when the block has one, as `{VERIFY} --quick {t.worktree} {t.round_dir()}`"
+    if role in ("reviewer", "security"):
+        return (f"3. {where} Don't run Verify, the Quick check or the test suite: QA owns tests, and the merge runs the "
+                "full Verify. Read the code. Fast static tools (a linter, a type checker, a dependency audit) are fine.")
+    if role == "qa":
+        return (f"3. {where} Run {quick}; if the block has no Quick check, run {full}. Don't run the full Verify "
+                "when there's a Quick check, unless the Notes ask for it: the merge runs it on the merged result.")
+    return (f"3. {where} Run {quick}. Run the full Verify only when your role's steps or the Notes call for it, and "
+            f"then {full[len('the full Verify '):]}.")
+
+
 def brief(t, role, notes, port, respawn, report):
     k = t.round
     previous = [str(t.round_dir(i)) for i in range(1, k) if t.round_dir(i).is_dir()]
@@ -99,9 +116,7 @@ def brief(t, role, notes, port, respawn, report):
         "(and screenshots, for QA, in the round folder).",
         "2. Never ask a question: nobody will answer. Decide, and write the assumption in your report. Follow any "
         "notes under `## Comments` in the Ticket: they are the human's.",
-        f"3. The repo's commands are in the `## Commands` block of `{t.worktree}/CLAUDE.md`. Run the full Verify only "
-        f"as `{VERIFY} {t.worktree} {t.round_dir()}`: it takes the repo's one test slot and reuses a passing log for an "
-        "unchanged commit.",
+        testing_rule(role, t),
         "4. Destructive git is blocked (stash, reset --hard, clean, checkout --/./-f, restore, switch -f, branch -D, "
         "commit --amend, push): other worktrees share this .git. Stage files by name. Never push.",
         "5. Start no subagents and no background commands: your turn ending closes this pane at once, and anything "

@@ -6,7 +6,7 @@ ran (qa, security), at a commit that is in the branch. Only the checks that fail
 so an earlier PASS stands for later commits. Then the base tip is merged into the branch, Verify runs once on that
 exact commit, and that commit is merged --no-ff into the base branch's checkout.
 
-Exit 0 merged; 2 a worktree is missing or not clean; 3 a required report isn't a PASS; 4 the base tip conflicts
+Exit 0 merged; 2 a worktree is missing or not clean, or a Worker of the Ticket is still running after 5 minutes; 3 a required report isn't a PASS; 4 the base tip conflicts
 with the branch (merge aborted, branch unchanged); 5 Verify failed (RED); 6 the merge into the base failed
 (aborted). Every exit prints one line saying what happened.
 """
@@ -14,14 +14,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _kal import CHECKS, Ticket, dirty, git, report_field, run, stop, teardown, worktrees
+from _kal import CHECKS, Ticket, dirty, git, report_field, run, settle, stop, teardown, worktrees
 
 HERE = Path(__file__).resolve().parent
 
 if len(sys.argv) != 2 or not Path(sys.argv[1]).is_file():
     stop(2, "usage: kal-merge <ticket file>")
 t = Ticket(sys.argv[1])
+if not settle(t.path):  # a Worker's teardown would sweep the port block under this merge's Verify
+    stop(2, f"a kal-worker for {t.nn} is still running after 5 minutes; not merged")
 trees = worktrees(t.repo)
+
+# A merge that landed but crashed before its cleanup (seen on a resume): finish the job instead of failing.
+landed = git("log", t.base, "--merges", "--format=%h", "-F", f"--grep=Merge {t.nn}: ", "-n", "1", cwd=t.repo)
+if landed and (not git("rev-parse", "--verify", "-q", f"refs/heads/{t.branch}", cwd=t.repo)
+               or not run("git", "merge-base", "--is-ancestor", t.branch, t.base, cwd=t.repo).returncode):
+    if t.branch in trees:
+        teardown(trees[t.branch], t.block)
+        run("git", "worktree", "remove", "--force", trees[t.branch], cwd=t.repo)
+    run("git", "branch", "-d", t.branch, cwd=t.repo)
+    subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log", f"merged into {t.base} at {landed}"])
+    stop(0, f"merged {t.nn} into {t.base} at {landed} (already landed; cleaned up)")
+
 for b in (t.base, t.branch):
     if b not in trees:
         stop(2, f"no worktree has {b} checked out")

@@ -1,20 +1,25 @@
 #!/bin/sh
-# kal-verify <worktree> <log-dir>
+# kal-verify [--quick] <worktree> <log-dir>
 # Runs the repo's Verify command (CLAUDE.md "- Verify: `cmd`") in <worktree> and writes
-# <log-dir>/verify-<short sha>.log. Exits with Verify's exit code (2: usage or no Verify command).
+# <log-dir>/verify-<short sha>.log. Exits with Verify's exit code (2: usage or no such command).
+# --quick runs the Commands block's optional `Quick check` instead (lint, types, unit, build: what's fast and
+# needs no shared services), logged as quick-<short sha>.log, with its own reuse store and no global slot.
 # Reuse: a pass is recorded per commit in the git common dir, so any worktree or Run can reuse it.
-[ $# -eq 2 ] || { echo "usage: kal-verify <worktree> <log-dir>" >&2; exit 2; }
+key=Verify name=verify store=kal-verify-passed
+if [ "${1:-}" = "--quick" ]; then key="Quick check" name=quick store=kal-quick-passed; shift; fi
+[ $# -eq 2 ] || { echo "usage: kal-verify [--quick] <worktree> <log-dir>" >&2; exit 2; }
 wt=$(cd "$1" && pwd) || exit 2
-cmd=$(sed -n 's/^- Verify[^`]*`\([^`]*\)`.*/\1/p' "$wt/CLAUDE.md" 2>/dev/null | head -n 1)
-[ -n "$cmd" ] || { echo "kal-verify: no '- Verify: \`cmd\`' line in $wt/CLAUDE.md" >&2; exit 2; }
+cmd=$(sed -n "s/^- $key[^\`]*\`\([^\`]*\)\`.*/\\1/p" "$wt/CLAUDE.md" 2>/dev/null | head -n 1)
+case "$cmd" in none|None|NONE|todo|TODO) cmd= ;; esac
+[ -n "$cmd" ] || { echo "kal-verify: no '- $key: \`cmd\`' line in $wt/CLAUDE.md" >&2; exit 2; }
 head=$(git -C "$wt" rev-parse HEAD) || exit 2
 short=$(git -C "$wt" rev-parse --short HEAD)
 mkdir -p "$2" || exit 2
-log=$(cd "$2" && pwd)/verify-$short.log
+log=$(cd "$2" && pwd)/$name-$short.log
 dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
 
 # Every pass from a clean tree, one commit per line, shared by every worktree and Run (see the reuse below).
-passed=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/kal-verify-passed
+passed=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/$store
 
 # Reuse a passing log for this exact commit, verified from a clean tree. Recorded in the store if it isn't yet
 # (logged before the store existed), so later commits with the same tree can reuse it too.
@@ -32,14 +37,15 @@ if [ "$dirty" = 0 ] && [ -f "$passed" ]; then
   for sha in $(tail -n 50 "$passed"); do
     if git -C "$wt" cat-file -e "$sha^{commit}" 2>/dev/null &&
       git -C "$wt" diff --quiet "$sha" "$head" -- . ':(exclude).scratch' ':(exclude).kal'; then
-      { echo "commit $head"; echo "dirty files: 0"; echo "reused: Verify passed at $sha, and only .scratch/ or .kal/ changed since"
+      { echo "commit $head"; echo "dirty files: 0"; echo "reused: $key passed at $sha, and only .scratch/ or .kal/ changed since"
         echo "kal-verify: exit 0"; } > "$log"
       echo "PASS (reused) $log"; exit 0
     fi
   done
 fi
 
-# One global slot per repo: a lock directory in the git common dir, shared by every worktree.
+# One global slot per repo for the full Verify: a lock directory in the git common dir, shared by every worktree.
+# The Quick check takes no slot: by definition it needs no shared services.
 lock=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/kal-verify.lock
 # Touch the log every second, from now until Verify ends, so the Worker watchdog sees progress
 # while we wait for the slot and while a quiet suite runs. Stops by itself if we die.
@@ -48,7 +54,7 @@ toucher=$!
 trap 'kill $toucher 2>/dev/null' EXIT
 trap 'exit 143' INT TERM HUP
 empty=0
-until mkdir "$lock" 2>/dev/null; do
+until [ "$name" = quick ] || mkdir "$lock" 2>/dev/null; do
   pid=$(cat "$lock/pid" 2>/dev/null)
   # Empty pid: the holder is between mkdir and writing it, so treat it as alive, but only for 5 polls:
   # a holder that died in between left it empty for good.
@@ -60,8 +66,10 @@ until mkdir "$lock" 2>/dev/null; do
   fi
   sleep 1
 done
-trap 'kill $toucher 2>/dev/null; rm -rf "$lock"' EXIT
-echo $$ > "$lock/pid"
+if [ "$name" = verify ]; then
+  trap 'kill $toucher 2>/dev/null; rm -rf "$lock"' EXIT
+  echo $$ > "$lock/pid"
+fi
 
 { echo "commit $head"; echo "dirty files: $dirty"; } > "$log"
 # RTK_DISABLED: rtk compresses test output and hides failures.

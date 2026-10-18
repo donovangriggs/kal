@@ -13,7 +13,7 @@ The per-ticket pipeline is the one in `/kal:build`. **Read [../build/SKILL.md](.
 ## What's different from /kal:build
 
 - **Many tickets at once.** Developers start only through `kal-next` (section 3), never on your own: it holds the 3 developer slots and the blocking edges. Every other role (checks, bug-fixers, mergers) starts as soon as its step comes up.
-- **Merges go into the integration branch.** `kal-merge` does that by itself: the Run's base is the integration branch. Merges happen one at a time, so run `kal-merge` in the foreground and never two at once.
+- **Merges go into the integration branch**, one at a time, **in the background.** `kal-merge` targets the integration branch by itself, and its full Verify can take minutes, so never block on it: when a ticket reaches `ready-to-merge` and no merge is running, run `kal-set <ticket> Status=merging --log "merging"` and start `kal-merge <ticket file>` with `run_in_background: true`. Other tickets that reach `ready-to-merge` meanwhile wait, and when a merge's completion arrives, act on its exit code (`/kal:build` section 6) and start the next waiting one, lowest number first. Keep scheduling (section 3) while a merge runs. On a resume, a ticket left `merging` with no merge running gets `kal-merge` again.
 - **The orchestrator stays responsive.** Handle each worker's completion as it arrives (a background notification starts your turn). Do the step it unblocks, then run sections 3 and 4, and end your turn.
 - **Ask late.** A ticket that needs you waits while everything else moves. Questions are batched when `kal-next` says `idle` (section 5).
 

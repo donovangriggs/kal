@@ -21,7 +21,7 @@ claude                       # accept the folder-trust prompt if it asks
 > /kal:setup
 ```
 
-Setup checks your tools, picks where tickets live (GitHub, GitLab, local markdown, or another tracker you describe), records how the repo verifies, serves and tears down, and commits all of it, so teammates get kal when they clone.
+Setup checks your tools, picks where tickets live (GitHub, GitLab, local markdown, or another tracker you describe), records how the repo verifies, serves and tears down, and commits all of it, so teammates get kal when they clone. Give it a **Quick check** (lint, types, unit, build) when your full Verify is slow: then the full Verify runs once per ticket, at merge.
 
 **Then, for each feature:**
 
@@ -44,12 +44,12 @@ Each step offers the next one when it finishes, so you rarely need to remember t
 
 ```
 for each ticket, as soon as its blockers have merged (up to 3 developers at once):
-  developer   builds it test-first, at the seams the spec agreed
-  reviewer    ┐
-  qa          ├ check the same commit, in parallel (qa drives the app in Chrome when there's UI;
-  security    ┘ security runs only when the diff touches auth, input, queries, files, secrets...)
+  developer   builds it test-first, at the seams the spec agreed; runs its tests + the Quick check
+  reviewer    ┐ check the same commit, in parallel: the reviewer reads code (never queues for tests),
+  qa          ├ qa runs the Quick check and drives the app in Chrome when there's UI, security runs
+  security    ┘ only when the diff touches auth, input, queries, files, secrets...
   bug-fixer   fixes blocking findings, then only the failed checks re-run (2 rounds at most)
-  merge       into the integration branch, after one more Verify
+  merge       into the integration branch, in the background, one at a time: the one full Verify
 
 end of the spec:
   refine-code, then final review + standards check + full browser QA in parallel, then fixes

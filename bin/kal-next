@@ -18,7 +18,7 @@ from pathlib import Path
 from _kal import Ticket, stop, tickets
 
 HERE = Path(__file__).resolve().parent
-MOVING = ("in-dev", "in-review", "fixing", "ready-to-merge")
+MOVING = ("in-dev", "in-review", "fixing", "ready-to-merge", "merging")
 
 if len(sys.argv) != 2 or not (Path(sys.argv[1]) / "run.md").is_file():
     stop(2, "usage: kal-next <run dir>  (a Run folder with run.md)")

@@ -23,7 +23,7 @@ QA_BASELINE = 4
 # kal-worker paints each Worker's tmux pane border and title with it.
 ROLE_COLOR = {"developer": "#8b85ff", "reviewer": "#3cc2c2", "qa": "#f0a43c", "security": "#ef6a8a",
               "bug-fixer": "#a88bef", "merger": "#3fbf6a"}  # QA's spare: a baseline server from the base branch's checkout
-COMMAND_KEYS = ("Verify", "Dev server", "Teardown", "Worktree setup")
+COMMAND_KEYS = ("Verify", "Quick check", "Dev server", "Teardown", "Worktree setup")
 
 
 def run(*cmd, cwd):
@@ -177,6 +177,19 @@ def covers(at, head, base, cwd):
         if not merged or merged.returncode or merged.stdout.split()[0] != git("rev-parse", f"{sha}^{{tree}}", cwd=cwd):
             return False
     return True
+
+
+def settle(ticket_file, timeout=300):
+    """Wait until no kal-worker process for this Ticket is alive. A Worker's pane closes before its kal-worker
+    finishes: it still runs Teardown and sweeps the Ticket's port block, which would kill servers a Verify
+    started meanwhile (a merge right after the last check). True once settled, False on timeout."""
+    pattern = f"kal-worker .*{re.escape(Path(ticket_file).name)}"
+    end = time.time() + timeout
+    while time.time() < end:
+        if subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode:
+            return True
+        time.sleep(1)
+    return False
 
 
 def teardown(worktree, port):

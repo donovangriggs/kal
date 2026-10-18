@@ -12,7 +12,7 @@ You are the **orchestrator** of a **Run** that carries one ticket from ready to 
 
 - **Workers, never subagents.** Start every worker as `kal-worker <role> <ticket file> …` with the Bash tool's `run_in_background: true`. Its first output line is `<pane id> <session id>`. Its completion notification, ending in `done` or `stalled`, means the worker has finished. Never poll a worker and never `sleep`.
 - **You alone write Run state.** Change the ticket mirror and `run.md` only through `kal-set` (and what `kal-begin` / `kal-merge` write). Log exactly one line per transition (`--log "…"`): no progress notes. Run state must be enough to resume from.
-- **Status values:** `in-dev`, `in-review`, `fixing`, `ready-to-merge`, `merged`, `parked`, `needs-you`.
+- **Status values:** `in-dev`, `in-review`, `fixing`, `ready-to-merge`, `merging` (a merge is running), `merged`, `parked`, `needs-you`.
 - **The main checkout stays on its branch.** You write only under `.kal/` there, apart from closing the ticket the way the tracker doc says. Never push.
 - **Models:** pass `--model <your own model id>` to developer and bug-fixer workers, so they run on the session's model. The other roles use their agent's model.
 - **Every question to the user goes through AskUserQuestion**, with the recommended option first and labelled "(Recommended)".

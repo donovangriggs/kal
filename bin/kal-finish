@@ -17,7 +17,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from _kal import dirty, field, git, report_field, run, stop, teardown, worktrees
+from _kal import dirty, field, git, report_field, run, settle, stop, teardown, worktrees
 
 HERE = Path(__file__).resolve().parent
 
@@ -31,6 +31,8 @@ run_dir = a.run_dir.resolve()
 text = (run_dir / "run.md").read_text()
 integration, int_wt = field("Base branch", text), field("Integration worktree", text)
 repo = run_dir.parent.parent.parent
+if not settle(run_dir / "tickets" / "00-final.md"):
+    stop(2, "a kal-worker for the end of the spec is still running after 5 minutes; not finished")
 trees = worktrees(repo)
 if trees.get(integration) != int_wt:
     stop(2, f"the integration worktree {int_wt} doesn't have {integration} checked out")

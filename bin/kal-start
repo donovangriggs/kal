@@ -78,7 +78,7 @@ for other in sorted((repo / ".kal" / "runs").iterdir()):
                 f"{other / 'pause'}`: its workers finish their current step, then it stops), or wait for it"))
 
 run_md = run_dir / "run.md"
-LIVE = ("in-dev", "in-review", "fixing", "ready-to-merge", "parked", "needs-you")
+LIVE = ("in-dev", "in-review", "fixing", "ready-to-merge", "merging", "parked", "needs-you")
 if run_md.exists():
     text = run_md.read_text()
     if field("Finished", text):

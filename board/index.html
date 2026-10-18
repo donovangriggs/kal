@@ -244,7 +244,7 @@ const ROLE_COLOR = { developer: "var(--dev)", reviewer: "var(--rev)", qa: "var(-
 const ROLE_SHORT = { developer: "D", reviewer: "R", qa: "Q", security: "S", "bug-fixer": "F", merger: "M" };
 const STATE_LABEL = { active: "Active", "paused-finishing": "Pausing", paused: "Paused", "needs-you": "Needs you", finished: "Finished", stopped: "Stopped" };
 const SEVS = ["CRITICAL", "HIGH", "SPEC", "MEDIUM", "LOW"];
-const LANES = ["Needs you", "Waiting on blockers", "Ready", "In dev", "Checks", "Fixing", "Parked", "Merged"];
+const LANES = ["Needs you", "Waiting on blockers", "Ready", "In dev", "Checks", "Fixing", "Merging", "Parked", "Merged"];
 
 function dur(sec) {
   if (sec == null || isNaN(sec)) return "—";
@@ -302,7 +302,7 @@ const runOf = () => S && (S.runs.find((r) => r.feature === hash().run) || S.runs
 function laneOf(t, run) {
   const merged = new Set(run.tickets.filter((x) => ["merged", "dropped"].includes(x.status)).map((x) => x.nn));
   if (t.status === "ready") return t.blocked_by.every((b) => merged.has(b)) ? "Ready" : "Waiting on blockers";
-  return { "in-dev": "In dev", "in-review": "Checks", "ready-to-merge": "Checks", fixing: "Fixing", parked: "Parked",
+  return { "in-dev": "In dev", "in-review": "Checks", "ready-to-merge": "Merging", merging: "Merging", fixing: "Fixing", parked: "Parked",
     "needs-you": "Needs you", merged: "Merged", dropped: "Merged" }[t.status] || "Ready";
 }
 function stages(t) {

@@ -50,7 +50,8 @@ Summarise what exists and what's missing, then ask. Skip any question exploratio
 
 **C. Commands.** Propose each line from what you found (prefer exactly what CI runs), then confirm or correct it with the user:
 
-- **Verify**: the full check CI runs: tests, plus lint and typecheck if CI runs them. Required.
+- **Verify**: the full check CI runs: tests, plus lint and typecheck if CI runs them. Required. It gates every merge.
+- **Quick check**: the fast part of Verify that needs no shared services: lint, type check, unit tests, build. Developers and QA run it instead of the full Verify, which then runs once per ticket, at merge. Recommend one whenever Verify is slow (more than a minute or two) or needs services (a database, fixtures, a browser). May be `none`, and then QA runs the full Verify.
 - **Dev server**: serves the app on `127.0.0.1` at port `{port}` (builds substitute the real port). May be `none`.
 - **Teardown**: stops whatever the app or its tests leave behind (containers, volumes). May be `none`.
 - **Worktree setup**: prepares a fresh checkout, usually installing dependencies. Builds skip it when they can clone the main checkout's dependency folders. May be `none`.
@@ -89,6 +90,7 @@ Never create `AGENTS.md` when `CLAUDE.md` exists, or the reverse. If either bloc
 ## Commands
 
 - Verify: `<command>`
+- Quick check: `<command>` (or `none`)
 - Dev server: `<command using {port}>` (or `none`)
 - Teardown: `<command>` (or `none`)
 - Worktree setup: `<command>` (or `none`)
