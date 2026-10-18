@@ -243,7 +243,7 @@ const ROLE_COLOR = { developer: "var(--dev)", reviewer: "var(--rev)", qa: "var(-
 const ROLE_SHORT = { developer: "D", reviewer: "R", qa: "Q", security: "S", "bug-fixer": "F", merger: "M" };
 const STATE_LABEL = { active: "Active", "paused-finishing": "Pausing", paused: "Paused", "needs-you": "Needs you", finished: "Finished", stopped: "Stopped" };
 const SEVS = ["CRITICAL", "HIGH", "SPEC", "MEDIUM", "LOW"];
-const LANES = ["Needs you", "Ready", "Waiting on blockers", "In dev", "Checks", "Fixing", "Parked", "Merged"];
+const LANES = ["Needs you", "Waiting on blockers", "Ready", "In dev", "Checks", "Fixing", "Parked", "Merged"];
 
 function dur(sec) {
   if (sec == null || isNaN(sec)) return "—";
