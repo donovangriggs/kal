@@ -5,15 +5,13 @@ dependencies ready, and set it in-dev, round 1.
 Dependencies: node_modules is cloned from the main checkout (APFS copy-on-write, instant, no extra disk) when the
 lockfile matches; otherwise the Commands block's `Worktree setup` runs there. Prints one line; exit 1 on failure.
 """
-import filecmp
 import subprocess
 import sys
 from pathlib import Path
 
-from _kal import Ticket, commands, field, run, stop
+from _kal import Ticket, field, prepare, run, stop
 
 HERE = Path(__file__).resolve().parent
-LOCKS = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock", "bun.lockb")
 
 if len(sys.argv) != 2 or not Path(sys.argv[1]).is_file():
     stop(2, "usage: kal-begin <ticket file>")
@@ -32,28 +30,10 @@ if r.returncode:
     stop(1, f"could not cut {t.branch} from {t.base} into {wt}: {r.stderr.strip()}")
 
 
-def cloned():
-    """node_modules copied from the main checkout when both trees hold the same lockfile."""
-    lock = next((l for l in LOCKS if (t.repo / l).is_file()), None)
-    src = t.repo / "node_modules"
-    if not lock or not src.is_dir() or not (wt / lock).is_file() or not filecmp.cmp(t.repo / lock, wt / lock, False):
-        return False
-    # ponytail: root node_modules only; per-package node_modules in a monorepo fall back to Worktree setup.
-    return run("cp", "-cR", str(src), str(wt / "node_modules"), cwd=t.repo).returncode == 0
-
-
-deps = "none"
-if cloned():
-    deps = "cloned node_modules"
-elif commands(wt)["Worktree setup"]:
-    try:
-        s = subprocess.run(["sh", "-c", commands(wt)["Worktree setup"]], cwd=wt, timeout=900,
-                           capture_output=True, text=True)
-    except subprocess.TimeoutExpired:
-        stop(1, f"Worktree setup timed out after 15 minutes in {wt}")
-    if s.returncode:
-        stop(1, f"Worktree setup failed in {wt}: {(s.stderr or s.stdout).strip().splitlines()[-1:] or '?'}")
-    deps = "Worktree setup"
+try:
+    deps = prepare(t.repo, wt)
+except RuntimeError as e:
+    stop(1, str(e))
 
 subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=in-dev", "Round=1", f"Branch={t.branch}",
                 f"Worktree={wt}", "Workers=", "--log", f"→ in-dev, round 1 ({deps})"], check=True)

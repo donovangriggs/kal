@@ -49,7 +49,8 @@ for each ticket, as soon as its blockers have merged (up to 3 developers at once
   qa          ├ qa runs the Quick check and drives the app in Chrome when there's UI, security runs
   security    ┘ only when the diff touches auth, input, queries, files, secrets...
   bug-fixer   fixes blocking findings, then only the failed checks re-run (2 rounds at most)
-  merge       into the integration branch, in the background, one at a time: the one full Verify
+  merge       into the integration branch, in the background: the one full Verify (tickets ready
+              together merge as a batch with one Verify; a red batch falls back to one at a time)
 
 end of the spec:
   refine-code, then final review + standards check + full browser QA in parallel, then fixes

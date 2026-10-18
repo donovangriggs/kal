@@ -179,6 +179,33 @@ def covers(at, head, base, cwd):
     return True
 
 
+LOCKS = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock", "bun.lockb")
+
+
+def prepare(repo, wt):
+    """Ready a fresh worktree's dependencies. node_modules is cloned from the main checkout (APFS copy-on-write:
+    instant, no extra disk) when both trees hold the same lockfile; otherwise the Commands block's `Worktree
+    setup` runs there. Returns what it did; raises RuntimeError when Worktree setup fails or times out."""
+    import filecmp
+    repo, wt = Path(repo), Path(wt)
+    lock = next((l for l in LOCKS if (repo / l).is_file()), None)
+    src = repo / "node_modules"
+    # ponytail: root node_modules only; per-package node_modules in a monorepo fall back to Worktree setup.
+    if lock and src.is_dir() and (wt / lock).is_file() and filecmp.cmp(repo / lock, wt / lock, False) \
+            and run("cp", "-cR", str(src), str(wt / "node_modules"), cwd=repo).returncode == 0:
+        return "cloned node_modules"
+    setup = commands(wt)["Worktree setup"]
+    if not setup:
+        return "none"
+    try:
+        s = subprocess.run(["sh", "-c", setup], cwd=wt, timeout=900, capture_output=True, text=True)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Worktree setup timed out after 15 minutes in {wt}")
+    if s.returncode:
+        raise RuntimeError(f"Worktree setup failed in {wt}: {(s.stderr or s.stdout).strip().splitlines()[-1:] or '?'}")
+    return "Worktree setup"
+
+
 def settle(ticket_file, timeout=300):
     """Wait until no kal-worker process for this Ticket is alive. A Worker's pane closes before its kal-worker
     finishes: it still runs Teardown and sweeps the Ticket's port block, which would kill servers a Verify

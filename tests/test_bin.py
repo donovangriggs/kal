@@ -519,3 +519,56 @@ class MergingIsLive(SpecRepo):
         self.mirror("01", status="merged")
         self.mirror("02", status="merging")
         self.assertEqual(self.next(), [])
+
+
+class BatchRepo(SpecRepo):
+    verify = "test ! -f broken.txt"
+
+    def two_ready(self, a_file="a.txt", b_file="b.txt"):
+        self.start_spec()
+        out = []
+        for nn, name in (("01", a_file), ("02", b_file)):
+            t = self.mirror(nn)
+            self.assertEqual(kal("kal-begin", str(t), cwd=self.repo).returncode, 0)
+            head = self.commit(Path(self.text(t, "Worktree")), name, f"{nn}\n")
+            self.report(t, "review.md", "PASS", head)
+            out.append(t)
+        return out
+
+    def integration(self):
+        return Path(self.text(self.run_dir / "run.md", "Integration worktree"))
+
+
+class Batch(BatchRepo):
+    def test_a_green_batch_lands_every_ticket_with_one_verify(self):
+        a, b = self.two_ready()
+        r = kal("kal-merge", str(a), str(b), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("01 0 merged 01", r.stdout)
+        self.assertIn("batch of 2, one Verify", r.stdout)
+        wt = self.integration()
+        self.assertTrue((wt / "a.txt").is_file() and (wt / "b.txt").is_file())
+        subjects = sh("git", "log", "--merges", "--format=%s", cwd=wt).stdout.split("\n")
+        self.assertIn("Merge 01: T01", subjects)
+        self.assertIn("Merge 02: T02", subjects)
+        self.assertEqual(len(list((self.run_dir / "reports" / "batch").rglob("verify-*.log"))), 1)
+        self.assertEqual((self.text(a, "Status"), self.text(b, "Status")), ("merged", "merged"))
+        self.assertEqual(sh("git", "branch", "--list", "kal/loans-*", cwd=self.repo).stdout.strip(), "")
+
+    def test_a_red_batch_falls_back_so_only_the_guilty_ticket_fails(self):
+        a, b = self.two_ready(b_file="broken.txt")
+        r = kal("kal-merge", str(a), str(b), cwd=self.repo)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("01 0 merged 01", r.stdout)
+        self.assertIn("02 5 RED", r.stdout)
+        self.assertIn("batch RED", r.stdout)
+        self.assertTrue((self.integration() / "a.txt").is_file())
+        self.assertFalse((self.integration() / "broken.txt").exists())
+
+    def test_a_conflicting_ticket_is_left_out_and_merged_one_at_a_time(self):
+        a, b = self.two_ready(a_file="same.txt", b_file="same.txt")
+        r = kal("kal-merge", str(a), str(b), cwd=self.repo)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("01 0 merged 01", r.stdout)
+        self.assertIn("02 4 ", r.stdout)
+        self.assertNotEqual(self.text(b, "Status"), "merged")  # the orchestrator sends it to the merger

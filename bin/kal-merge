@@ -1,89 +1,203 @@
 #!/usr/bin/env python3
-"""kal-merge <ticket file>: merge one approved Ticket into the Run's base branch, then clean it up.
+"""kal-merge <ticket file> [<ticket file> ...]: merge approved Tickets into the Run's base branch, then clean up.
 
-The gate: the reviewer's latest report must be a PASS, and so must the latest report of every other check that
-ran (qa, security), at a commit that is in the branch. Only the checks that failed run again after a fix round,
-so an earlier PASS stands for later commits. Then the base tip is merged into the branch, Verify runs once on that
-exact commit, and that commit is merged --no-ff into the base branch's checkout.
+The gate, per Ticket: the reviewer's latest report must be a PASS, and so must the latest report of every other
+check that ran (qa, security), at a commit that is in the branch. Only the checks that failed run again after a
+fix round, so an earlier PASS stands for later commits. Before anything, it waits for the Ticket's kal-worker
+processes to exit (a Worker's teardown would sweep the port block under this merge's Verify).
 
-Exit 0 merged; 2 a worktree is missing or not clean, or a Worker of the Ticket is still running after 5 minutes; 3 a required report isn't a PASS; 4 the base tip conflicts
-with the branch (merge aborted, branch unchanged); 5 Verify failed (RED); 6 the merge into the base failed
-(aborted). Every exit prints one line saying what happened.
+One Ticket: the base tip is merged into the branch, Verify runs once on that exact commit, and that commit is
+merged --no-ff into the base branch's checkout. Exit 0 merged; 2 a worktree is missing or not clean, or a Worker
+is still running after 5 minutes; 3 a required report isn't a PASS; 4 the base tip conflicts with the branch
+(merge aborted, branch unchanged); 5 Verify failed (RED); 6 the merge into the base failed (aborted). It prints
+one line saying what happened.
+
+Several Tickets (a batch, for when they're ready together): each is gated as above, then their branches are
+merged in order into a temporary branch cut from the base tip, and Verify runs ONCE on the result. Green: the
+base fast-forwards to it (the same `Merge NN: <title>` commits as one at a time) and every Ticket is cleaned up.
+Red: the batch is thrown away and the Tickets are merged one at a time, so only the guilty one goes red. A Ticket
+that conflicts with the batch is left out of it and merged one at a time after it. Prints one line per Ticket,
+`<NN> <exit code> <what happened>` with the exit codes above; exits 0 when all merged, else 1.
 """
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from _kal import CHECKS, Ticket, dirty, git, report_field, run, settle, stop, teardown, worktrees
+from _kal import CHECKS, Ticket, dirty, git, prepare, report_field, run, settle, teardown, worktrees
 
 HERE = Path(__file__).resolve().parent
 
-if len(sys.argv) != 2 or not Path(sys.argv[1]).is_file():
-    stop(2, "usage: kal-merge <ticket file>")
-t = Ticket(sys.argv[1])
-if not settle(t.path):  # a Worker's teardown would sweep the port block under this merge's Verify
-    stop(2, f"a kal-worker for {t.nn} is still running after 5 minutes; not merged")
-trees = worktrees(t.repo)
 
-# A merge that landed but crashed before its cleanup (seen on a resume): finish the job instead of failing.
-landed = git("log", t.base, "--merges", "--format=%h", "-F", f"--grep=Merge {t.nn}: ", "-n", "1", cwd=t.repo)
-if landed and (not git("rev-parse", "--verify", "-q", f"refs/heads/{t.branch}", cwd=t.repo)
-               or not run("git", "merge-base", "--is-ancestor", t.branch, t.base, cwd=t.repo).returncode):
-    if t.branch in trees:
-        teardown(trees[t.branch], t.block)
-        run("git", "worktree", "remove", "--force", trees[t.branch], cwd=t.repo)
-    run("git", "branch", "-d", t.branch, cwd=t.repo)
-    subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log", f"merged into {t.base} at {landed}"])
-    stop(0, f"merged {t.nn} into {t.base} at {landed} (already landed; cleaned up)")
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
 
-for b in (t.base, t.branch):
-    if b not in trees:
-        stop(2, f"no worktree has {b} checked out")
-    changed = dirty(trees[b])
-    if changed:
-        stop(2, f"the worktree of {b} ({trees[b]}) is not clean: {', '.join(changed[:5])}")
-base_wt, wt = trees[t.base], trees[t.branch]
-head = git("rev-parse", t.branch, cwd=t.repo)
 
-for role in CHECKS:
-    reports = t.reports(role)
-    if not reports:
-        if role == "reviewer":
-            stop(3, f"no reviewer report for {t.nn}; not merged")
-        continue
-    k, path = reports[-1]
-    body = path.read_text()
-    verdict, at = report_field("Verdict", body), report_field("At", body)
-    if verdict != "PASS":
-        stop(3, f"round-{k}/{path.name} is {verdict or 'missing its Verdict'}; not merged")
-    # ponytail: a check that passed in an earlier round isn't re-run after later fix rounds (only the failed
-    # checks are); its PASS holds if its commit is an ancestor of the head. The final review re-checks it all.
-    if not at or run("git", "merge-base", "--is-ancestor", at, head, cwd=t.repo).returncode:
-        stop(3, f"round-{k}/{path.name} is a PASS at {at or '?'}, which isn't in {t.branch}; not merged")
+def mark_merged(t, tip):
+    subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log",
+                    f"merged into {t.base} at {tip}"])
 
-if run("git", "merge-base", "--is-ancestor", t.base, t.branch, cwd=t.repo).returncode:
-    if run("git", "merge", "--no-edit", t.base, cwd=wt).returncode:
-        run("git", "merge", "--abort", cwd=wt)
-        stop(4, f"{t.base} conflicts with {t.branch}; merge aborted, branch unchanged")
 
-verified = git("rev-parse", "HEAD", cwd=wt)
-v = subprocess.run([str(HERE / "kal-verify"), wt, str(t.round_dir())], text=True, stdout=subprocess.PIPE)
-if v.returncode:
-    stop(5, f"RED: Verify failed on {verified[:7]}, not merged: {v.stdout.strip()}")
+def gate(t):
+    """Settle, then check the Ticket can merge. Returns (base worktree, branch worktree, branch head), or None when
+    its merge already landed (a crash before cleanup, seen on a resume: cleaned up here). Raises Fail."""
+    if not settle(t.path):
+        raise Fail(2, f"a kal-worker for {t.nn} is still running after 5 minutes; not merged")
+    trees = worktrees(t.repo)
+    landed = git("log", t.base, "--merges", "--format=%h", "-F", f"--grep=Merge {t.nn}: ", "-n", "1", cwd=t.repo)
+    if landed and (not git("rev-parse", "--verify", "-q", f"refs/heads/{t.branch}", cwd=t.repo)
+                   or not run("git", "merge-base", "--is-ancestor", t.branch, t.base, cwd=t.repo).returncode):
+        if t.branch in trees:
+            teardown(trees[t.branch], t.block)
+            run("git", "worktree", "remove", "--force", trees[t.branch], cwd=t.repo)
+        run("git", "branch", "-d", t.branch, cwd=t.repo)
+        mark_merged(t, landed)
+        return None
+    for b in (t.base, t.branch):
+        if b not in trees:
+            raise Fail(2, f"no worktree has {b} checked out")
+        changed = dirty(trees[b])
+        if changed:
+            raise Fail(2, f"the worktree of {b} ({trees[b]}) is not clean: {', '.join(changed[:5])}")
+    head = git("rev-parse", t.branch, cwd=t.repo)
+    for role in CHECKS:
+        reports = t.reports(role)
+        if not reports:
+            if role == "reviewer":
+                raise Fail(3, f"no reviewer report for {t.nn}; not merged")
+            continue
+        k, path = reports[-1]
+        body = path.read_text()
+        verdict, at = report_field("Verdict", body), report_field("At", body)
+        if verdict != "PASS":
+            raise Fail(3, f"round-{k}/{path.name} is {verdict or 'missing its Verdict'}; not merged")
+        # ponytail: a check that passed in an earlier round isn't re-run after later fix rounds (only the failed
+        # checks are); its PASS holds if its commit is an ancestor of the head. The final review re-checks it all.
+        if not at or run("git", "merge-base", "--is-ancestor", at, head, cwd=t.repo).returncode:
+            raise Fail(3, f"round-{k}/{path.name} is a PASS at {at or '?'}, which isn't in {t.branch}; not merged")
+    return trees[t.base], trees[t.branch], head
 
-# Merge the verified sha, not the branch name, so only the tree Verify saw can land.
-if run("git", "merge", "--no-ff", verified, "-m", f"Merge {t.nn}: {t.title}", cwd=base_wt).returncode:
-    run("git", "merge", "--abort", cwd=base_wt)
-    stop(6, f"merging {t.branch} into {t.base} failed; aborted")
-tip = git("rev-parse", "--short", "HEAD", cwd=base_wt)
 
-notes = []
-teardown(wt, t.block)  # first: its stack may hold files the worktree removal needs
-# --force: the tree was clean and is now merged; only Verify/Teardown leftovers can remain.
-if run("git", "worktree", "remove", "--force", wt, cwd=base_wt).returncode:
-    notes.append(f"worktree {wt} not removed")
-if run("git", "branch", "-d", t.branch, cwd=base_wt).returncode:  # from base_wt: merged into its HEAD
-    notes.append(f"branch {t.branch} not deleted")
+def clean_up(t, base_wt, wt, tip):
+    notes = []
+    teardown(wt, t.block)  # first: its stack may hold files the worktree removal needs
+    # --force: the tree was clean and is now merged; only Verify/Teardown leftovers can remain.
+    if run("git", "worktree", "remove", "--force", wt, cwd=base_wt).returncode:
+        notes.append(f"worktree {wt} not removed")
+    if run("git", "branch", "-d", t.branch, cwd=base_wt).returncode:  # from base_wt: merged into its HEAD
+        notes.append(f"branch {t.branch} not deleted")
+    mark_merged(t, tip)
+    return f"merged {t.nn} into {t.base} at {tip}" + "".join(f"; {n}" for n in notes)
 
-subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log", f"merged into {t.base} at {tip}"])
-print(f"merged {t.nn} into {t.base} at {tip}" + "".join(f"; {n}" for n in notes))
+
+def merge_one(t):
+    """(exit code, line) for one Ticket, one at a time."""
+    try:
+        checked = gate(t)
+    except Fail as f:
+        return f.code, f.msg
+    if checked is None:
+        return 0, f"merged {t.nn} into {t.base} (already landed; cleaned up)"
+    base_wt, wt, _ = checked
+    if run("git", "merge-base", "--is-ancestor", t.base, t.branch, cwd=t.repo).returncode:
+        if run("git", "merge", "--no-edit", t.base, cwd=wt).returncode:
+            run("git", "merge", "--abort", cwd=wt)
+            return 4, f"{t.base} conflicts with {t.branch}; merge aborted, branch unchanged"
+    verified = git("rev-parse", "HEAD", cwd=wt)
+    v = subprocess.run([str(HERE / "kal-verify"), wt, str(t.round_dir())], text=True, stdout=subprocess.PIPE)
+    if v.returncode:
+        return 5, f"RED: Verify failed on {verified[:7]}, not merged: {v.stdout.strip()}"
+    # Merge the verified sha, not the branch name, so only the tree Verify saw can land.
+    if run("git", "merge", "--no-ff", verified, "-m", f"Merge {t.nn}: {t.title}", cwd=base_wt).returncode:
+        run("git", "merge", "--abort", cwd=base_wt)
+        return 6, f"merging {t.branch} into {t.base} failed; aborted"
+    return 0, clean_up(t, base_wt, wt, git("rev-parse", "--short", "HEAD", cwd=base_wt))
+
+
+def merge_batch(ts):
+    """{NN: (exit code, line)} for several Tickets: one Verify for all of them when the batch is green."""
+    results, ready = {}, []
+    for t in ts:
+        try:
+            checked = gate(t)
+        except Fail as f:
+            results[t.nn] = (f.code, f.msg)
+            continue
+        if checked is None:
+            results[t.nn] = (0, f"merged {t.nn} into {t.base} (already landed; cleaned up)")
+        else:
+            ready.append((t, *checked))
+    if len(ready) < 2:
+        for t, *_ in ready:
+            results[t.nn] = merge_one(t)
+        return results
+
+    first = ready[0][0]
+    base, base_wt, repo = first.base, ready[0][1], first.repo
+    tmp_branch = f"kal/{first.feature}-batch"
+    tmp_wt = repo.parent / f"{repo.name}-kal" / f"{first.feature}-batch"
+    run("git", "worktree", "remove", "--force", str(tmp_wt), cwd=repo)  # leftovers of a crashed batch
+    run("git", "branch", "-D", tmp_branch, cwd=repo)
+    later, members, fallback = [], [], None
+
+    def drop_tmp():
+        teardown(tmp_wt, 5100)
+        run("git", "worktree", "remove", "--force", str(tmp_wt), cwd=repo)
+        run("git", "branch", "-D", tmp_branch, cwd=repo)
+
+    if run("git", "worktree", "add", "-q", "-b", tmp_branch, str(tmp_wt), base, cwd=repo).returncode:
+        fallback = "couldn't cut the batch branch"
+    else:
+        try:
+            prepare(repo, tmp_wt)
+        except RuntimeError as e:
+            fallback = str(e)
+    if not fallback:
+        for t, t_base_wt, wt, head in ready:
+            if run("git", "merge", "--no-ff", head, "-m", f"Merge {t.nn}: {t.title}", cwd=tmp_wt).returncode:
+                run("git", "merge", "--abort", cwd=tmp_wt)
+                later.append(t)  # conflicts with the base or an earlier member: one at a time, after the batch
+            else:
+                members.append((t, wt, git("rev-parse", "--short", "HEAD", cwd=tmp_wt)))
+        if len(members) < 2:
+            fallback = "fewer than 2 Tickets merge cleanly together"
+    if not fallback:
+        logs = first.run_dir / "reports" / "batch" / time.strftime("%Y%m%d-%H%M%S")
+        v = subprocess.run([str(HERE / "kal-verify"), str(tmp_wt), str(logs)], text=True, stdout=subprocess.PIPE)
+        for t, _, _ in members:  # each Ticket's round folder keeps the Verify that let it land
+            for log in logs.glob("verify-*.log"):
+                shutil.copy(log, t.round_dir() / log.name)
+        tip = git("rev-parse", "HEAD", cwd=tmp_wt)
+        if v.returncode:
+            fallback = f"batch RED on {tip[:7]} ({', '.join(t.nn for t, _, _ in members)})"
+        elif run("git", "merge", "--ff-only", tip, cwd=base_wt).returncode:
+            fallback = f"{base} moved during the batch"
+        else:
+            for t, wt, merge_sha in members:
+                results[t.nn] = (0, clean_up(t, base_wt, wt, merge_sha) + f" (batch of {len(members)}, one Verify)")
+    drop_tmp()
+    if fallback:  # one at a time: only the guilty Ticket goes red
+        later = [t for t, *_ in ready]
+    for t in later:
+        code, line = merge_one(t)
+        results[t.nn] = (code, line + (f" (one at a time: {fallback})" if fallback else " (after the batch)"))
+    return results
+
+
+args = sys.argv[1:]
+if not args or not all(Path(a).is_file() for a in args):
+    print("usage: kal-merge <ticket file> [<ticket file> ...]")
+    sys.exit(2)
+tickets = [Ticket(a) for a in args]
+if len(tickets) == 1:
+    code, line = merge_one(tickets[0])
+    print(line)
+    sys.exit(code)
+results = merge_batch(tickets)
+for t in tickets:
+    code, line = results[t.nn]
+    print(f"{t.nn} {code} {line}")
+sys.exit(0 if all(code == 0 for code, _ in results.values()) else 1)
