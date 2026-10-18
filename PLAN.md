@@ -311,3 +311,13 @@ Each milestone is usable on its own:
 - ~~Can `claude` start a session as a plugin agent?~~ Yes: `claude --agent kal:<role>` (confirmed). AFK permissions use `--permission-mode dontAsk` plus an allowlist in the Worker's `--settings`.
 - Does a skill reference like `kal:red-green` resolve through the Skill tool inside worker sessions? (Confirmed in a headless `--plugin-dir` session; still to confirm in launcher-started workers.)
 - Do plugin-shipped hooks fire inside worker sessions started by the launcher, or only through the launcher's own `--settings`?
+
+## 16. Status
+
+- Milestones 1 to 3 are done and verified live in tmux: `/kal:build` on one ticket (including STUCK, needs-you and resume from a retry note), and `/kal:build-spec` on a 3-ticket spec (parallel developers, a blocker releasing, the trivial fast path, the end of spec, the hand-off question, and merging to main with cleanup).
+- Covered by unit tests, but not yet exercised live: pause and resume between features, discovered tickets and parking, the context relay, and the startup-prompt kill.
+- Changes from the plan made during the build:
+  - Worker permissions: any Bash command plus guards, instead of a command allowlist (the allowlist proved brittle live).
+  - Workers get `--strict-mcp-config`.
+  - `kal-start` refuses repos Claude hasn't trusted.
+  - The end of spec runs as Ticket `00` through the same worker machinery.

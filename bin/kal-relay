@@ -1,0 +1,11 @@
+#!/bin/sh
+# Request a Relay: kal-relay "<resume line>". Run it, then end the turn; the plugin's hooks do the rest:
+# Stop types /clear into this pane, SessionStart:clear types the resume line and drops the request.
+set -eu
+[ $# -eq 1 ] && [ -n "$1" ] || { echo "usage: kal-relay \"<resume line>\"" >&2; exit 2; }
+pane=${TMUX_PANE:?kal-relay: not inside tmux}
+# ponytail: keyed by pane id only; two tmux servers with the same pane id would share a request
+req="${TMPDIR:-/tmp}/kal-relay-${pane#%}"
+rm -f "$req.clearing"   # a stale marker from a Relay that never landed would block this one's /clear
+printf '%s' "$1" > "$req"
+echo "relay requested: end your turn now"

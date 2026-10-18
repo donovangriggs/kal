@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kal-worker ROLE <ticket file> [--model M] [--note TEXT ...] [--respawn] [--attach PANE]
+"""kal-worker ROLE <ticket file> [--as NAME] [--model M] [--note TEXT ...] [--respawn] [--attach PANE]
 Run one Worker in its own tmux pane and block until it ends its turn.
 
 Prints "<pane id> <session id>" at launch, then "done" when the Worker ends its turn (or its claude exits),
@@ -19,6 +19,9 @@ QA alone gets qa-mcp.json: chrome-devtools in --isolated mode (a throwaway Chrom
 
 Watchdog: every KAL_WATCHDOG_TICK seconds (60) it checks the newest change among the Worker's transcript and its
 round folder. KAL_STALL_SECS (900) with no change, or KAL_MAX_SECS (3600) in all, kills the pane: "stalled".
+--as NAME: run the Role under another name, for a second Worker of the same Role on one Ticket (the end of a
+spec runs the reviewer twice: final review, and the standards check as `--as standards`). NAME sets the report
+(<NAME>.md), the brief and the pane title.
 --respawn: the Role's last Worker crashed or stalled. Same round; the brief opens with a note. If this Role was
 already respawned in this round it prints "needs-human: ..." and exits 3.
 When the Ticket's last pane closes, Teardown runs in the worktree and the Ticket's port block is swept.
@@ -76,7 +79,7 @@ def plugin_flags(repo):
     return [] if enabled else ["--plugin-dir", str(ROOT)]
 
 
-def brief(t, role, notes, port, respawn):
+def brief(t, role, notes, port, respawn, report):
     k = t.round
     previous = [str(t.round_dir(i)) for i in range(1, k) if t.round_dir(i).is_dir()]
     siblings = [f"{p.name.split('-')[0]} {field('Status', p.read_text())}" for p in sorted(t.path.parent.glob("*.md"))
@@ -92,7 +95,7 @@ def brief(t, role, notes, port, respawn):
         f"- Ticket: {t.path}",
         f"- Round folder: {t.round_dir()}",
         f"- Previous round folders: {', '.join(previous) or 'none'}",
-        f"- Your report: {t.round_dir() / (REPORT[role] + '.md')}",
+        f"- Your report: {t.round_dir() / report}",
         f"- Worktree: {t.worktree}",
         f"- Branch: {t.branch}",
         f"- Base branch: {t.base} (checked out at {base_wt})",
@@ -136,6 +139,7 @@ def settings(role, t):
 p = argparse.ArgumentParser(prog="kal-worker")
 p.add_argument("role", choices=REPORT)
 p.add_argument("ticket", type=Path)
+p.add_argument("--as", dest="name", metavar="NAME")
 p.add_argument("--model")
 p.add_argument("--note", action="append", default=[])
 p.add_argument("--respawn", action="store_true")
@@ -149,8 +153,10 @@ t = Ticket(a.ticket)
 folder = t.round_dir()
 folder.mkdir(parents=True, exist_ok=True)
 port = t.block + PORT_OFFSET[a.role]
-brief_file = folder / f"{a.role}-brief.txt"
-title = f"{t.nn} {a.role}"
+name = a.name or a.role
+report = f"{a.name}.md" if a.name else REPORT[a.role] + ".md"
+brief_file = folder / f"{name}-brief.txt"
+title = f"{t.nn} {name}"
 sid = str(uuid.uuid4())
 tmp = Path(tempfile.mkdtemp(prefix="kal-worker-"))
 
@@ -167,9 +173,9 @@ if a.attach:  # the Worker runs already; its session id (for the watchdog) is in
     title = show(pane, "#{pane_title}") or title
 else:
     if a.respawn and brief_file.is_file() and NOTE in brief_file.read_text():
-        stop(3, f"needs-human: {a.role} crashed or stalled twice in round {t.round}, see {folder}")
-    (folder / (REPORT[a.role] + ".md")).unlink(missing_ok=True)
-    brief_file.write_text(brief(t, a.role, a.note, port, a.respawn))
+        stop(3, f"needs-human: {name} crashed or stalled twice in round {t.round}, see {folder}")
+    (folder / report).unlink(missing_ok=True)
+    brief_file.write_text(brief(t, a.role, a.note, port, a.respawn, report))
     (tmp / "settings.json").write_text(json.dumps(settings(a.role, t), indent=1))
     mcp = ["--strict-mcp-config"]  # only the servers kal passes: a project's MCP approval prompt would block AFK
     if a.role == "qa":

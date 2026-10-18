@@ -245,3 +245,156 @@ class MergeRed(Repo):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpecRepo(Repo):
+    """A build-spec Run: Tickets merge into an integration branch, the end goes to the target (main)."""
+
+    def start_spec(self):
+        r = kal("kal-start", str(self.run_dir), "--mode", "build-spec", cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        return self.text(self.run_dir / "run.md", "Integration worktree")
+
+    def mirror(self, nn, status="ready", blocked="none", extra=""):
+        path = self.run_dir / "tickets" / f"{nn}-t{nn}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {nn}: T{nn}\n\nStatus: {status}\nSize: small\nBlocked by: {blocked}\n{extra}\n## Log\n")
+        return path
+
+    def next(self, **env):
+        return kal("kal-next", str(self.run_dir), cwd=self.repo, env={**ENV, **env}).stdout.strip().splitlines()
+
+
+class BuildSpecStart(SpecRepo):
+    def test_cuts_integration_branch_and_records_target(self):
+        wt = Path(self.start_spec())
+        run_md = self.run_dir / "run.md"
+        self.assertEqual(self.text(run_md, "Base branch"), "kal/loans")
+        self.assertEqual(self.text(run_md, "Target branch"), "main")
+        self.assertEqual(sh("git", "branch", "--show-current", cwd=wt).stdout.strip(), "kal/loans")
+
+    def test_tickets_merge_into_the_integration_branch(self):
+        int_wt = Path(self.start_spec())
+        t = self.ticket()
+        kal("kal-begin", str(t), cwd=self.repo)
+        wt = Path(self.text(t, "Worktree"))
+        head = self.commit(wt, "renew.txt", "ok\n")
+        self.report(t, "review.md", "PASS", head)
+        r = kal("kal-merge", str(t), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue((int_wt / "renew.txt").is_file())
+        self.assertFalse((self.repo / "renew.txt").exists())  # main untouched until the end
+
+    def test_refuses_while_another_run_is_live_and_allows_it_once_paused(self):
+        self.start_spec()
+        other = self.repo / ".kal" / "runs" / "holds"
+        r = kal("kal-start", str(other), cwd=self.repo)
+        self.assertEqual(r.returncode, 4, r.stdout)
+        (self.run_dir / "pause").touch()
+        self.assertEqual(kal("kal-start", str(other), cwd=self.repo).returncode, 0)
+
+
+class Next(SpecRepo):
+    def setUp(self):
+        super().setUp()
+        self.start_spec()
+
+    def test_frontier_respects_blockers_and_three_slots(self):
+        for nn in ("01", "02", "03", "04"):
+            self.mirror(nn)
+        self.mirror("05", blocked="01")
+        lines = self.next()
+        self.assertEqual([l.split()[0] for l in lines], ["start"] * 3)
+        self.assertTrue(lines[0].endswith("01-t01.md") and lines[2].endswith("03-t03.md"))
+
+    def test_live_developers_take_slots_but_other_roles_dont(self):
+        self.mirror("01", status="in-dev", extra="Workers: developer opus %1 10:00, qa sonnet %2 10:00\n")
+        self.mirror("02", status="in-dev", extra="Workers: developer opus %3 10:00\n")
+        self.mirror("03")
+        self.mirror("04")
+        self.assertEqual(len(self.next()), 1)
+
+    def test_parked_ticket_resumes_once_its_prerequisite_merges(self):
+        self.mirror("01", status="parked", extra="Waits on: 02\n")
+        self.mirror("02", status="in-review")
+        self.assertEqual(self.next(), [])
+        self.mirror("02", status="merged")
+        self.assertEqual(self.next()[0].split()[0], "resume")
+
+    def test_idle_lines(self):
+        self.mirror("01", status="merged")
+        self.assertEqual(self.next(), ["idle: all merged"])
+        self.mirror("02", status="needs-you")
+        self.mirror("03", blocked="02")
+        self.assertEqual(self.next(), ["idle: needs you: 02; waiting on them: 03"])
+        self.mirror("02", status="dropped")
+        self.assertTrue(self.next()[0].startswith("start"))
+
+    def test_pause_stops_new_starts(self):
+        self.mirror("01")
+        (self.run_dir / "pause").touch()
+        self.assertTrue(self.next()[0].startswith("idle: paused"))
+
+
+class Finish(SpecRepo):
+    def finished_tickets(self):
+        int_wt = Path(self.start_spec())
+        t = self.ticket()
+        kal("kal-begin", str(t), cwd=self.repo)
+        head = self.commit(Path(self.text(t, "Worktree")), "renew.txt", "ok\n")
+        self.report(t, "review.md", "PASS", head)
+        self.assertEqual(kal("kal-merge", str(t), cwd=self.repo).returncode, 0)
+        return int_wt
+
+    def test_final_needs_every_ticket_merged(self):
+        self.start_spec()
+        self.mirror("01", status="in-dev")
+        self.assertEqual(kal("kal-final", str(self.run_dir), cwd=self.repo).returncode, 1)
+
+    def test_final_ticket_builds_on_integration_and_targets_main(self):
+        int_wt = self.finished_tickets()
+        self.assertEqual(kal("kal-final", str(self.run_dir), cwd=self.repo).returncode, 0)
+        final = self.run_dir / "tickets" / "00-final.md"
+        self.assertEqual(self.text(final, "Base branch"), "main")
+        self.assertEqual(self.text(final, "Branch"), "kal/loans")
+        self.assertEqual(self.text(final, "Worktree"), str(int_wt))
+
+    def test_finish_gates_on_the_final_review_then_merges_and_cleans_up(self):
+        int_wt = self.finished_tickets()
+        kal("kal-final", str(self.run_dir), cwd=self.repo)
+        final = self.run_dir / "tickets" / "00-final.md"
+        self.assertEqual(kal("kal-finish", str(self.run_dir), "--merge-into", "main", cwd=self.repo).returncode, 3)
+        head = sh("git", "rev-parse", "HEAD", cwd=int_wt).stdout.strip()
+        self.report(final, "review.md", "PASS", head)
+        self.report(final, "standards.md", "CHANGES", head)
+        self.assertEqual(kal("kal-finish", str(self.run_dir), "--merge-into", "main", cwd=self.repo).returncode, 3)
+        self.report(final, "standards.md", "PASS", head, k=2)
+        r = kal("kal-finish", str(self.run_dir), "--merge-into", "main", cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue((self.repo / "renew.txt").is_file())
+        self.assertFalse(int_wt.exists())
+        self.assertEqual(sh("git", "branch", "--list", "kal/*", cwd=self.repo).stdout.strip(), "")
+        self.assertTrue(self.text(self.run_dir / "run.md", "Finished"))
+
+    def test_keep_branch_leaves_the_integration_branch(self):
+        int_wt = self.finished_tickets()
+        kal("kal-final", str(self.run_dir), cwd=self.repo)
+        head = sh("git", "rev-parse", "HEAD", cwd=int_wt).stdout.strip()
+        self.report(self.run_dir / "tickets" / "00-final.md", "review.md", "PASS", head)
+        self.assertEqual(kal("kal-finish", str(self.run_dir), "--keep-branch", cwd=self.repo).returncode, 0)
+        self.assertIn("kal/loans", sh("git", "branch", "--list", "kal/loans", cwd=self.repo).stdout)
+        self.assertFalse((self.repo / "renew.txt").exists())
+
+
+class Ctx(unittest.TestCase):
+    def test_reads_context_from_the_transcript_and_asks_for_a_relay(self):
+        config = Path(tempfile.mkdtemp(prefix="kal-ctx-"))
+        (config / "projects" / "x").mkdir(parents=True)
+        usage = {"input_tokens": 1000, "cache_read_input_tokens": 260000, "cache_creation_input_tokens": 0}
+        (config / "projects" / "x" / "s1.jsonl").write_text(json.dumps({"message": {"usage": usage}}) + "\n")
+        run_dir = config / "run"
+        run_dir.mkdir()
+        (run_dir / "run.md").write_text("# Run\n\nPhase: tickets\n")
+        env = {**ENV, "CLAUDE_CONFIG_DIR": str(config), "CLAUDE_CODE_SESSION_ID": "s1"}
+        self.assertEqual(kal("kal-ctx", str(run_dir), cwd=config, env=env).stdout.strip(), "261000 relay")
+        self.assertIn("Context: 261k", (run_dir / "run.md").read_text())

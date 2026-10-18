@@ -40,6 +40,7 @@ You are the **orchestrator** of a **Run** that carries one ticket from ready to 
 3. Run `kal-start .kal/runs/<feature>`. It prints one line:
    - **Exit 1:** a check failed. Show the user the line (it's the fix) and stop.
    - **Exit 3:** setup is missing. Tell the user to run `/kal:setup` and stop.
+   - **Exit 4:** another Run is active in this repo. Ask: pause it (recommended) / stop. To pause, run `touch <its run dir>/pause`, then tell the user to run this command again once its panes have closed. Then stop.
    - **Exit 0:** `first start`, `resume` or `finished`. On `finished`, say so and stop.
 4. Run `kal-begin <ticket file>`. It cuts the branch and worktree from the base branch and readies dependencies. On a resume it just reports what's already there.
 

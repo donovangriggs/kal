@@ -69,6 +69,17 @@ def repo_of(path):
     return Path(common).parent if common else None
 
 
+def numbers(line):
+    """Ticket numbers in a `Blocked by:` / `Waits on:` line: every standalone number ("01, 03" -> ["01", "03"]);
+    "none" or an empty line -> []."""
+    return [f"{int(n):02d}" for n in re.findall(r"\b(\d+)\b", line or "")]
+
+
+def tickets(run_dir):
+    """Every Ticket mirror of a Run except the end-of-spec Ticket 00, lowest number first."""
+    return [Ticket(p) for p in sorted((Path(run_dir) / "tickets").glob("[0-9]*.md")) if not p.name.startswith("00-")]
+
+
 class Ticket:
     """A Ticket mirror at <repo>/.kal/runs/<feature>/tickets/NN-<slug>.md and everything derived from it."""
 
@@ -87,7 +98,13 @@ class Ticket:
         self.worktree = field("Worktree", self.text) or str(self.repo.parent / f"{self.repo.name}-kal" /
                                                             f"{self.feature}-{self.nn}")
         run_text = self.run_md.read_text() if self.run_md.exists() else ""
-        self.base = field("Base branch", run_text)
+        # A Ticket's own `Base branch:` wins: the end-of-spec Ticket 00 builds on the integration branch and
+        # merges into the target, while every other Ticket merges into the Run's base (the integration branch).
+        self.base = field("Base branch", self.text) or field("Base branch", run_text)
+        self.status = field("Status", self.text) or "ready"
+        self.blocked_by = numbers(field("Blocked by", self.text))
+        self.waits_on = numbers(field("Waits on", self.text))
+        self.workers = [w.split() for w in (field("Workers", self.text) or "").split(",") if w.strip()]
         self.block = 5100 + 10 * int(self.nn)
 
     def round_dir(self, k=None):

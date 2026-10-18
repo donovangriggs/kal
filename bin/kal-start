@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""kal-start <run dir> [--base BRANCH]: preflight a Run, then write its run.md on a first start.
+"""kal-start <run dir> [--mode build|build-spec] [--base BRANCH]: preflight a Run, then write its run.md on a
+first start.
 
-<run dir> is <repo>/.kal/runs/<feature>. The base branch (where Tickets merge) defaults to the main checkout's
-current branch. Prints one line. Exit 0: `first start: …`, `resume: …` (run.md exists) or `finished …`.
-Exit 1: a check failed; the line is the fix. Exit 3: setup is missing (docs/agents/ or the Commands block).
+<run dir> is <repo>/.kal/runs/<feature>. --base defaults to the main checkout's current branch.
+- build: Tickets merge straight into the base branch.
+- build-spec: the base becomes the Run's target; Tickets merge into an integration branch kal/<feature>, cut from
+  it into its own worktree, and the integration branch reaches the target only at the end (kal-finish).
+One Run is active per repo: another Run that is live (a listed Worker's pane is open, or its heartbeat is under
+15 minutes old) and not paused makes this exit 4. Running the command again on a paused Run resumes it (the pause
+flag is removed). Prints one line. Exit 0: `first start: …`, `resume: …` or `finished …`. Exit 1: a check failed;
+the line is the fix. Exit 3: setup is missing. Exit 4: another Run is active; the line names it.
 """
 import argparse
 import json
@@ -13,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from _kal import commands, dirty, field, git, repo_of, run, stop
+from _kal import commands, dirty, field, git, repo_of, run, stop, tickets
 
 HERE = Path(__file__).resolve().parent
 
@@ -30,6 +36,7 @@ def trusted(repo):
 
 p = argparse.ArgumentParser(prog="kal-start")
 p.add_argument("run_dir", type=Path)
+p.add_argument("--mode", choices=("build", "build-spec"), default="build")
 p.add_argument("--base")
 a = p.parse_args()
 
@@ -50,6 +57,26 @@ if not trusted(repo):
 if run("git", "check-ignore", "-q", ".kal/runs", cwd=repo).returncode:
     stop(1, ".kal/ isn't gitignored: run /kal:setup, or add `.kal/` to .gitignore and commit it")
 
+def active(other):
+    """Another Run that is still going: not finished, and either a listed Worker's pane is still open (even when
+    paused: those Workers are finishing their step, and may hold ports), or it isn't paused and its heartbeat is
+    fresh."""
+    text = (other / "run.md").read_text() if (other / "run.md").is_file() else ""
+    if not text or field("Finished", text):
+        return False
+    panes = [w[2] for t in tickets(other) for w in t.workers if len(w) > 2]
+    if any(run("tmux", "display", "-p", "-t", pane, "#{pane_id}", cwd=repo).stdout.strip() == pane for pane in panes):
+        return True
+    return not (other / "pause").exists() and time.time() - int(field("Heartbeat", text) or 0) < 900
+
+
+for other in sorted((repo / ".kal" / "runs").iterdir()):
+    if other.is_dir() and other != run_dir and active(other):
+        paused = (other / "pause").exists()
+        stop(4, f"active: {other.name} is " + ("paused, but its workers are finishing their current step: try again "
+                "once their panes have closed" if paused else f"still building. Pause it first (`touch "
+                f"{other / 'pause'}`: its workers finish their current step, then it stops), or wait for it"))
+
 run_md = run_dir / "run.md"
 LIVE = ("in-dev", "in-review", "fixing", "ready-to-merge", "parked", "needs-you")
 if run_md.exists():
@@ -58,6 +85,7 @@ if run_md.exists():
         stop(0, f"finished at {field('Finished', text)}: this Run is done")
     live = [t for t in (run_dir / "tickets").glob("*.md") if field("Status", t.read_text()) in LIVE]
     if live or field("Mode", text) != "build":
+        (run_dir / "pause").unlink(missing_ok=True)
         stop(0, f"resume: base branch {field('Base branch', text)}")
     # A single-ticket Run folder with nothing in flight: the next /kal:build starts afresh from the current branch.
 
@@ -76,10 +104,20 @@ v = subprocess.run([str(HERE / "kal-verify"), str(repo), str(run_dir / "reports"
 if v.returncode:
     stop(1, f"Verify is red on {base} ({v.stdout.split()[-1] if v.stdout.split() else '?'}): fix it first")
 
-if run_md.exists():  # a reused single-ticket Run folder: keep its Log, point it at today's base
+if run_md.exists() and a.mode == "build":  # a reused single-ticket Run folder: keep its Log, new base
     subprocess.run([str(HERE / "kal-set"), str(run_md), f"Base branch={base}", f"Heartbeat={int(time.time())}",
                     "--log", f"new build on {base}"], check=True)
     stop(0, f"first start: base branch {base} (Run folder reused)")
-run_md.write_text(f"# Run: {run_dir.name}\n\nMode: build\nBase branch: {base}\nPhase: tickets\n"
-                  f"Started: {time.strftime('%Y-%m-%d %H:%M')}\nHeartbeat: {int(time.time())}\n\n## Notes\n\n## Log\n")
-print(f"first start: base branch {base}")
+header = f"Mode: {a.mode}\nBase branch: {base}\n"
+if a.mode == "build-spec":
+    integration = f"kal/{run_dir.name}"
+    wt = repo.parent / f"{repo.name}-kal" / f"{run_dir.name}-integration"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    r = run("git", "worktree", "add", "-q", "-b", integration, str(wt), base, cwd=repo)
+    if r.returncode:
+        stop(1, f"could not cut {integration} from {base} into {wt}: {r.stderr.strip()} (a leftover from an earlier "
+                f"Run? remove it with `git worktree remove {wt}` and `git branch -D {integration}`)")
+    header = f"Mode: build-spec\nBase branch: {integration}\nTarget branch: {base}\nIntegration worktree: {wt}\n"
+run_md.write_text(f"# Run: {run_dir.name}\n\n{header}Phase: tickets\nStarted: {time.strftime('%Y-%m-%d %H:%M')}\n"
+                  f"Heartbeat: {int(time.time())}\n\n## Notes\n\n## Log\n")
+print(f"first start: base branch {base}" + (f", integration branch kal/{run_dir.name}" if a.mode == "build-spec" else ""))

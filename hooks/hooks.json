@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/kal-relay-hook\" stop" } ] }
+    ],
+    "SessionStart": [
+      { "matcher": "clear", "hooks": [ { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/kal-relay-hook\" clear" } ] }
+    ]
+  }
+}

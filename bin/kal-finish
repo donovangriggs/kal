@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""kal-finish <run dir> (--merge-into BRANCH | --keep-branch): hand a finished build-spec Run off, then clean up.
+
+The gate: the newest report of each end-of-spec check that ran (review.md, standards.md, qa.md, security.md under
+reports/00/) must be a PASS. Then:
+- --merge-into BRANCH: Verify runs on the integration head (reused if it passed), and that commit is merged
+  --no-ff into BRANCH, which must be checked out and clean in some checkout (normally the main one).
+- --keep-branch: nothing is merged; the integration branch stays (the Orchestrator has pushed it for a PR).
+Either way: Teardown and port sweeps, the integration worktree and any leftover Ticket worktrees and merged
+Ticket branches of this Run removed, run.md marked Finished.
+Exit 0 done; 2 a checkout is missing or not clean; 3 a check isn't a PASS; 4 the merge conflicts (aborted);
+5 Verify failed. Every exit prints one line.
+"""
+import argparse
+import re
+import subprocess
+import time
+from pathlib import Path
+
+from _kal import dirty, field, git, report_field, run, stop, teardown, worktrees
+
+HERE = Path(__file__).resolve().parent
+
+p = argparse.ArgumentParser(prog="kal-finish")
+p.add_argument("run_dir", type=Path)
+g = p.add_mutually_exclusive_group(required=True)
+g.add_argument("--merge-into", metavar="BRANCH")
+g.add_argument("--keep-branch", action="store_true")
+a = p.parse_args()
+run_dir = a.run_dir.resolve()
+text = (run_dir / "run.md").read_text()
+integration, int_wt = field("Base branch", text), field("Integration worktree", text)
+repo = run_dir.parent.parent.parent
+trees = worktrees(repo)
+if trees.get(integration) != int_wt:
+    stop(2, f"the integration worktree {int_wt} doesn't have {integration} checked out")
+if dirty(int_wt):
+    stop(2, f"the integration worktree {int_wt} is not clean: {', '.join(dirty(int_wt)[:5])}")
+
+for name in ("review.md", "standards.md", "qa.md", "security.md"):
+    found = sorted((d for d in (run_dir / "reports" / "00").glob("round-*") if (d / name).is_file()),
+                   key=lambda d: int(d.name[6:]))
+    if name == "review.md" and not found:
+        stop(3, "no final review report under reports/00/")
+    if found:
+        verdict = report_field("Verdict", (found[-1] / name).read_text())
+        if verdict != "PASS":
+            stop(3, f"{found[-1].name}/{name} is {verdict or 'missing its Verdict'}; not finished")
+
+head = git("rev-parse", "HEAD", cwd=int_wt)
+if a.merge_into:
+    if a.merge_into not in trees:
+        stop(2, f"no checkout has {a.merge_into} checked out: check it out in the main checkout first")
+    target_wt = trees[a.merge_into]
+    if dirty(target_wt):
+        stop(2, f"{target_wt} ({a.merge_into}) is not clean: {', '.join(dirty(target_wt)[:5])}")
+    v = subprocess.run([str(HERE / "kal-verify"), int_wt, str(run_dir / "reports" / "00" / "finish")], text=True,
+                       stdout=subprocess.PIPE)
+    if v.returncode:
+        stop(5, f"RED: Verify failed on {head[:7]}, not merged: {v.stdout.strip()}")
+    if run("git", "merge", "--no-ff", head, "-m", f"Merge {run_dir.name}", cwd=target_wt).returncode:
+        run("git", "merge", "--abort", cwd=target_wt)
+        stop(4, f"merging {integration} into {a.merge_into} conflicts; aborted")
+
+notes = []
+teardown(int_wt, 5100)
+for nn_wt in sorted(Path(int_wt).parent.glob(f"{run_dir.name}-[0-9]*")):  # leftover Ticket worktrees
+    teardown(nn_wt, 5100 + 10 * int(re.sub(r"\D", "", nn_wt.name.rsplit("-", 1)[-1]) or 0))
+    if run("git", "worktree", "remove", "--force", str(nn_wt), cwd=repo).returncode:
+        notes.append(f"worktree {nn_wt} not removed")
+if run("git", "worktree", "remove", "--force", int_wt, cwd=repo).returncode:
+    notes.append(f"worktree {int_wt} not removed")
+for b in git("for-each-ref", "--format=%(refname:short)", f"refs/heads/{integration}-*", cwd=repo).split():
+    run("git", "branch", "-d", b, cwd=repo)  # only merged ones go; an unmerged leftover stays for the human
+if a.merge_into and run("git", "branch", "-d", integration, cwd=repo).returncode:
+    notes.append(f"branch {integration} not deleted")
+
+where = f"merged into {a.merge_into} at {git('rev-parse', '--short', 'HEAD', cwd=trees[a.merge_into])}" \
+    if a.merge_into else f"kept as {integration} at {head[:7]}"
+subprocess.run([str(HERE / "kal-set"), str(run_dir / "run.md"), "Phase=done", f"Finished={time.strftime('%Y-%m-%d %H:%M')}",
+                "--log", where], check=True)
+print(f"finished {run_dir.name}: {where}" + "".join(f"; {n}" for n in notes))

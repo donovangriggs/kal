@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""kal-final <run dir>: open the end of a build-spec Run as Ticket 00, `tickets/00-final.md`.
+
+Ticket 00 is the whole integration branch: its Branch and Worktree are the integration branch's, and its own
+`Base branch:` is the Run's target. So the end-of-spec Workers (refine, final review, standards, full QA, and the
+fix rounds) run through kal-worker like any Ticket, with reports under reports/00/. Sets run.md's Phase to final.
+Prints one line; on a resume (00 exists already) it says so and changes nothing.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+from _kal import field, stop, tickets
+
+HERE = Path(__file__).resolve().parent
+
+if len(sys.argv) != 2 or not (Path(sys.argv[1]) / "run.md").is_file():
+    stop(2, "usage: kal-final <run dir>")
+run_dir = Path(sys.argv[1]).resolve()
+text = (run_dir / "run.md").read_text()
+if field("Mode", text) != "build-spec":
+    stop(1, "kal-final is for build-spec Runs only")
+final = run_dir / "tickets" / "00-final.md"
+if final.exists():
+    stop(0, f"resume: {final} exists (Status: {field('Status', final.read_text())})")
+open_ = [t.nn for t in tickets(run_dir) if t.status not in ("merged", "dropped")]
+if open_:
+    stop(1, f"not every Ticket is merged ({', '.join(open_)}): finish or drop them first")
+final.write_text(f"# 00: Final: {run_dir.name}\n\nStatus: in-review\nRound: 1\nSize: large\n"
+                 f"Base branch: {field('Target branch', text)}\nBranch: {field('Base branch', text)}\n"
+                 f"Worktree: {field('Integration worktree', text)}\nWorkers:\n\n## What to build\n\n"
+                 "The whole spec, as merged on the integration branch: see spec.md.\n\n## Log\n")
+subprocess.run([str(HERE / "kal-set"), str(run_dir / "run.md"), "Phase=final", "--log", "→ end of spec"], check=True)
+print(f"final: {final}")
