@@ -39,7 +39,7 @@ import time
 import uuid
 from pathlib import Path
 
-from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROOT, Ticket, field, stop, teardown, worktrees
+from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROOT, Ticket, field, kal_loaded, stop, teardown, worktrees
 
 NOTE = "A previous attempt at this step crashed or stalled. Read the branch and this round's reports first."
 GUARD = ROOT / "bin" / "_kal_guard.py"
@@ -64,19 +64,9 @@ def last_change(sid, folder):
 
 
 def plugin_flags(repo):
-    """--plugin-dir for this checkout of kal, unless kal is installed for the repo (enabledPlugins in user,
-    project or local settings; the later file wins). Lets a dev checkout run Workers without installing it."""
-    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    enabled = False
-    for f in (cfg / "settings.json", repo / ".claude" / "settings.json", repo / ".claude" / "settings.local.json"):
-        try:
-            plugins = json.loads(f.read_text()).get("enabledPlugins", {})
-        except (OSError, ValueError):
-            continue
-        for key, on in plugins.items():
-            if key.split("@")[0] == "kal":
-                enabled = bool(on)
-    return [] if enabled else ["--plugin-dir", str(ROOT)]
+    """--plugin-dir for this checkout of kal unless a claude started in the repo loads kal by itself (installed and
+    enabled). Lets a dev checkout, or a fresh clone that enables kal before installing it, still run Workers."""
+    return [] if kal_loaded(repo) else ["--plugin-dir", str(ROOT)]
 
 
 def brief(t, role, notes, port, respawn, report):

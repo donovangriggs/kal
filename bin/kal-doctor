@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""kal-doctor [<repo>]: check everything kal needs, and say how to fix what's missing.
+
+One line per check: `ok`, `missing` or `warn`, the check, and the fix. Checks the tools (git, tmux, python3, node
+for browser QA, Chrome, and gh / glab when the repo's remote points there), then the repo: Claude Code's folder
+trust (Workers stop at the trust prompt otherwise), kal enabled for the repo, /kal:setup's output (docs/agents/,
+the Commands block, .kal/ gitignored), and whether this shell is inside tmux. Read-only.
+Exit 0 when builds can run; 1 when something they need is missing (planning works either way).
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _kal import commands, kal_loaded  # noqa: E402
+
+rows, blocking = [], False
+
+
+def check(ok, what, fix, need=True):
+    global blocking
+    rows.append(("ok" if ok else "missing" if need else "warn", what, "" if ok else fix))
+    blocking |= need and not ok
+
+
+def out(*cmd, cwd=None):
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+top = out("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=repo)
+repo = Path(top).parent if top else repo
+
+check(shutil.which("git"), "git", "xcode-select --install")
+check(shutil.which("tmux"), "tmux (builds run in its panes)", "brew install tmux")
+check(sys.version_info >= (3, 9), f"python3 >= 3.9 (found {sys.version.split()[0]})", "brew install python")
+check(shutil.which("npx"), "node / npx (browser QA's chrome-devtools)", "brew install node", need=False)
+chrome = Path("/Applications/Google Chrome.app").exists() or any(shutil.which(c) for c in ("google-chrome", "chromium"))
+check(chrome, "Google Chrome (browser QA)", "install Google Chrome", need=False)
+remote = out("git", "remote", "get-url", "origin", cwd=repo)
+if "github" in remote:
+    check(shutil.which("gh") and not subprocess.run(["gh", "auth", "status"], capture_output=True).returncode,
+          "gh, signed in (GitHub tracker and PRs)", "brew install gh && gh auth login")
+if "gitlab" in remote:
+    check(shutil.which("glab"), "glab (GitLab tracker and MRs)", "brew install glab && glab auth login")
+
+if not top:
+    check(False, f"{repo} is a git repo", "run kal inside a git repository")
+else:
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json" if os.environ.get("CLAUDE_CONFIG_DIR") \
+        else Path.home() / ".claude.json"
+    try:
+        projects = json.loads(cfg.read_text()).get("projects", {})
+    except (OSError, ValueError):
+        projects = {}
+    trusted = any(projects.get(str(d), {}).get("hasTrustDialogAccepted") for d in (repo, *repo.parents))
+    check(trusted, "Claude Code trusts this folder (Workers stop at the trust prompt otherwise)",
+          f"run `claude` in {repo} once without --dangerously-skip-permissions and accept the prompt")
+    check(kal_loaded(repo), "kal is installed and enabled for this repo", "claude plugin install kal@kal --scope "
+          "project (or start claude with --plugin-dir <kal checkout> while developing kal)", need=False)
+    check((repo / "docs" / "agents").is_dir(), "/kal:setup has run (docs/agents/)", "run /kal:setup")
+    check(bool(commands(repo)["Verify"]), "CLAUDE.md has a Commands block with a Verify command", "run /kal:setup")
+    ignored = not subprocess.run(["git", "check-ignore", "-q", ".kal/runs"], cwd=repo).returncode
+    check(ignored, ".kal/ is gitignored", "run /kal:setup (or add .kal/ to .gitignore)")
+check(bool(os.environ.get("TMUX")), "this shell is inside tmux (builds need it)",
+      "tmux new -A -s kal claude", need=False)
+
+width = max(len(w) for _, w, _ in rows)
+for status, what, fix in rows:
+    print((f"{status:<8}{what:<{width}}" + (f"  -> {fix}" if fix else "")).rstrip())
+print("ready to build" if not blocking else "fix the missing items above before building (planning works now)")
+sys.exit(1 if blocking else 0)

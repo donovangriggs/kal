@@ -1,5 +1,6 @@
 """Helpers shared by the Python kal-* commands. A script imports it from its own folder (`from _kal import ...`):
 Python puts a script's folder first on sys.path. The leading underscore keeps it off the kal-* command space."""
+import json
 import os
 import re
 import signal
@@ -61,6 +62,28 @@ def commands(checkout):
         cmd = m[1].strip() if m else ""
         out[key] = None if cmd.lower() in ("", "none", "todo") else cmd
     return out
+
+
+def kal_loaded(repo):
+    """kal is installed for this repo (user scope, or project/local scope for this path) and not disabled in the
+    user, project or local settings: a `claude` started in the repo loads it. Enabled-but-not-installed (a fresh
+    clone before `claude plugin install`) doesn't count."""
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    try:
+        installed = json.loads((cfg / "plugins" / "installed_plugins.json").read_text()).get("plugins", {})
+    except (OSError, ValueError):
+        installed = {}
+    found = any(key.split("@")[0] == "kal" and (e.get("scope") == "user" or e.get("projectPath") == str(repo))
+                for key, entries in installed.items() for e in entries)
+    enabled = None
+    for f in (cfg / "settings.json", repo / ".claude" / "settings.json", repo / ".claude" / "settings.local.json"):
+        try:
+            for key, on in json.loads(f.read_text()).get("enabledPlugins", {}).items():
+                if key.split("@")[0] == "kal":
+                    enabled = bool(on)
+        except (OSError, ValueError):
+            pass
+    return found and enabled is not False
 
 
 def repo_of(path):

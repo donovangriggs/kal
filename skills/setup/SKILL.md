@@ -31,19 +31,9 @@ Read what's actually there; assume nothing.
 
 ### Requirements check
 
-Check each tool and note any that are missing, with a one-line fix:
+Run `kal-doctor`. It checks every tool a build needs (git, tmux, python3, node, Chrome, and `gh`/`glab` when the remote points there), Claude Code's folder trust for this repo, and whether kal is enabled here, printing a fix for each gap. Its setup checks (`docs/agents/`, the Commands block, `.kal/` ignored) will fail until this skill has run; that's expected.
 
-| Tool | Check | Needed for | Fix (macOS) |
-|---|---|---|---|
-| tmux | `command -v tmux` | builds | `brew install tmux` |
-| git | `command -v git` | everything | `xcode-select --install` |
-| python3 | `command -v python3` | builds, dashboard | `brew install python` |
-| node / npx | `command -v npx` | browser QA | `brew install node` |
-| Chrome | `/Applications/Google Chrome.app`, or `google-chrome` / `chromium` on PATH | browser QA | install Google Chrome |
-| gh | `command -v gh` and `gh auth status` | GitHub tracker | `brew install gh && gh auth login` |
-| glab | `command -v glab` | GitLab tracker | `brew install glab && glab auth login` |
-
-Only check `gh` or `glab` if that tracker is in play. A missing tool doesn't stop setup: planning works without any of them. List what's missing and what it blocks.
+A missing tool doesn't stop setup: planning works without any of them. Carry the list of what's missing (and what it blocks) into the summary.
 
 ## 2. Present and ask
 
@@ -129,6 +119,6 @@ For an "Other" tracker, write `docs/agents/issue-tracker.md` from the user's des
 
 ## 5. Done
 
-Tell the user setup is complete. List any missing tools again with their fixes. Mention they can edit `docs/agents/*.md` and the `## Commands` block directly at any time; re-running `/kal:setup` is only needed to switch trackers or start over.
+Run `kal-doctor` again and show its output: every setup line should now be `ok`. Tell the user setup is complete, and repeat any remaining `missing` or `warn` lines with their fixes. Mention they can edit `docs/agents/*.md` and the `## Commands` block directly at any time; re-running `/kal:setup` is only needed to switch trackers or start over.
 
 Then use AskUserQuestion to offer the next step: plan a feature with `/kal:interrogate-and-record` (recommended for something that fits one session), chart a bigger effort with `/kal:pathfinder`, or stop here. If they pick one, call the Skill tool with "kal:interrogate-and-record" or "kal:pathfinder".

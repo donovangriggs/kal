@@ -31,7 +31,7 @@ FINISH  refine-code → final review | standards | full browser QA → fixes
 ## 2. Install and setup
 
 ```sh
-claude plugin marketplace add donovangriggs/kal     # once per machine
+claude plugin marketplace add donovangriggs/kalistera     # once per machine
 claude plugin install kal@kal --scope project        # per repo
 /kal:setup                                           # per repo, inside Claude
 ```

@@ -1,6 +1,7 @@
 """Tests for bin/: the git guard, kal-set, kal-verify, kal-start, kal-begin and kal-merge, against throwaway git
 repos. Run: python3 -m unittest discover -s tests"""
 import json
+import sys
 import os
 import subprocess
 import tempfile
@@ -398,3 +399,42 @@ class Ctx(unittest.TestCase):
         env = {**ENV, "CLAUDE_CONFIG_DIR": str(config), "CLAUDE_CODE_SESSION_ID": "s1"}
         self.assertEqual(kal("kal-ctx", str(run_dir), cwd=config, env=env).stdout.strip(), "261000 relay")
         self.assertIn("Context: 261k", (run_dir / "run.md").read_text())
+
+
+class Loaded(unittest.TestCase):
+    """kal_loaded: what decides whether Workers need --plugin-dir."""
+
+    def setUp(self):
+        sys.path.insert(0, str(BIN))
+        from _kal import kal_loaded
+        self.loaded = kal_loaded
+        self.cfg = Path(tempfile.mkdtemp(prefix="kal-cfg-"))
+        self.repo = Path(tempfile.mkdtemp(prefix="kal-repo-"))
+        (self.cfg / "plugins").mkdir()
+        (self.repo / ".claude").mkdir()
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.cfg)
+
+    def tearDown(self):
+        os.environ["CLAUDE_CONFIG_DIR"] = str(CONFIG)
+
+    def install(self, **entry):
+        (self.cfg / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {"kal@kal": [entry]}}))
+
+    def enable(self, on):
+        (self.repo / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"kal@kal": on}}))
+
+    def test_enabled_but_not_installed_is_not_loaded(self):
+        self.enable(True)
+        self.assertFalse(self.loaded(self.repo))
+
+    def test_installed_for_this_project_is_loaded(self):
+        self.install(scope="project", projectPath=str(self.repo))
+        self.enable(True)
+        self.assertTrue(self.loaded(self.repo))
+
+    def test_installed_for_another_project_or_disabled_is_not(self):
+        self.install(scope="project", projectPath="/elsewhere")
+        self.assertFalse(self.loaded(self.repo))
+        self.install(scope="user")
+        self.enable(False)
+        self.assertFalse(self.loaded(self.repo))
