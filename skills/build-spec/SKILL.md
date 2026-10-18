@@ -26,6 +26,7 @@ The per-ticket pipeline is the one in `/kal:build`. **Read [../build/SKILL.md](.
    - **Exit 3:** tell the user to run `/kal:setup` and stop.
    - **Exit 4:** another Run is active. Ask: pause it (recommended) / stop. To pause, run `touch <its run dir>/pause`, then tell the user to run this command again once its panes have closed. Then stop.
    - **Exit 0:** `first start`, `resume` or `finished`. On `finished`, say so and stop.
+   Then run `kal-board` and print the URL it prints, once: `Board: <url>`. Don't repeat it later.
 4. **On a resume:** read `run.md`'s `## Notes` (your handoff from before a Relay) and each mirror's `## Log`. Re-attach a waiter to every worker listed in any `Workers:` line (`kal-worker <role> <ticket> [--as <name>] --attach <pane id>`, in the background). Pick up each ticket from its status. If `run.md` says `Phase: final`, continue at section 6.
 5. Go to section 3.
 

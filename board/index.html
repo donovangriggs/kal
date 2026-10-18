@@ -1,0 +1,554 @@
+<!doctype html>
+<!-- The kal Board: every Run of this repo, live. Served by bin/kal-board, which also serves state.json (board/state.py)
+     and files/<path> (reports, verify logs, screenshots under .kal/). Read-only: nothing here changes a Run. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kal board</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f1f3f6; --line: #e3e6eb; --line-2: #d4d9e0;
+  --text: #16191d; --muted: #646d78; --faint: #9aa3ad;
+  --accent: #4f46e5; --accent-soft: #eceafd;
+  --pass: #14883e; --pass-soft: #e3f4e9; --warn: #b26a00; --warn-soft: #fbf0dc;
+  --block: #c62a2f; --block-soft: #fbe5e5; --live: #2563eb; --live-soft: #e3ebfd;
+  --park: #7c5cc4; --park-soft: #efe9fb; --idle: #c3c9d1;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  --shadow-lg: 0 12px 40px rgba(16,24,40,.18);
+  --r: 10px;
+  --dev: #4f46e5; --rev: #0e8f8f; --qa: #d97706; --sec: #be3455; --fix: #7c5cc4; --mrg: #14883e;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1013; --panel: #16191e; --panel-2: #1c2026; --line: #262b33; --line-2: #313741;
+    --text: #e8ebef; --muted: #98a1ac; --faint: #67707b;
+    --accent: #8b85ff; --accent-soft: #24223f;
+    --pass: #3fbf6a; --pass-soft: #15291d; --warn: #e3a23a; --warn-soft: #2d2412; --block: #ef5b60; --block-soft: #331718;
+    --live: #5b8cff; --live-soft: #172340; --park: #a88bef; --park-soft: #241d36; --idle: #3a414b;
+    --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 16px 50px rgba(0,0,0,.6);
+    --dev: #8b85ff; --rev: #3cc2c2; --qa: #f0a43c; --sec: #ef6a8a; --fix: #a88bef; --mrg: #3fbf6a;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: 248px minmax(0, 1fr) 300px; height: 100vh; }
+.muted { color: var(--muted); } .faint { color: var(--faint); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.empty-note { color: var(--faint); font-size: 12px; padding: 10px 0; }
+
+/* sidebar: runs (home) */
+.side { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.brand { padding: 18px 18px 14px; display: flex; align-items: center; gap: 10px; }
+.logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; }
+.brand b { font-size: 14px; } .brand small { display: block; color: var(--muted); font-size: 11.5px; }
+.side h6 { margin: 8px 18px 6px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+.runs { overflow: auto; padding: 0 10px 20px; flex: 1; }
+.run { display: block; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 9px; padding: 10px; cursor: pointer; margin-bottom: 4px; }
+.run:hover { background: var(--panel-2); }
+.run.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.run .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.run .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.bar { height: 4px; border-radius: 4px; background: var(--line); margin-top: 8px; overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; }
+.livei { padding: 10px 18px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); display: flex; align-items: center; gap: 7px; }
+.ldot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); animation: pulse 1.8s infinite; flex: none; }
+.down .ldot { background: var(--block); animation: none; }
+.offline { display: none; margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-weight: 550; font-size: 12.5px; }
+.down .offline { display: block; }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.s-active { color: var(--live); background: var(--live-soft); }
+.s-active::before { animation: pulse 1.6s infinite; }
+.s-needs-you { color: var(--block); background: var(--block-soft); }
+.s-paused, .s-paused-finishing { color: var(--warn); background: var(--warn-soft); }
+.s-finished { color: var(--pass); background: var(--pass-soft); }
+.s-stopped { color: var(--muted); background: var(--panel-2); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* main */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.head { padding: 18px 24px 0; }
+.title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.title h1 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+.branch { font-family: var(--mono); font-size: 12px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+.stat label { display: block; font-size: 11px; color: var(--muted); }
+.stat b { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.stat b small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.slots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: 2px; }
+.slots i { width: 8px; height: 8px; border-radius: 2px; background: var(--line-2); }
+.slots i.on { background: var(--live); }
+.tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--line); }
+.tab { border: none; background: none; padding: 9px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 550; }
+.tab.on { color: var(--text); border-color: var(--accent); }
+.tab span { font-size: 11px; color: var(--faint); margin-left: 4px; }
+.view { flex: 1; overflow: auto; padding: 16px 24px 40px; min-height: 0; }
+.hero { margin: 80px auto; max-width: 440px; text-align: center; }
+.hero h2 { margin: 0 0 6px; font-size: 18px; }
+
+/* lanes: their own scrolling panel (never under the rail), empty lanes slim */
+.lane-scroll { position: relative; overflow-x: auto; overflow-y: hidden; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.lane-scroll.at-end { -webkit-mask-image: none; mask-image: none; }
+.lane-scroll::-webkit-scrollbar { height: 8px; } .lane-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+.lanes { display: flex; gap: 10px; align-items: flex-start; width: max-content; padding-right: 28px; }
+.lane { width: 240px; flex: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.lane > header { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 8px; font-weight: 600; font-size: 12.5px; }
+.lane > header span { color: var(--faint); font-weight: 500; }
+.lane.slim { width: 38px; padding: 8px 0; opacity: .7; }
+.lane.slim > header { writing-mode: vertical-rl; transform: rotate(180deg); padding: 6px 0; margin: 0 auto; gap: 8px; justify-content: flex-end; font-size: 12px; white-space: nowrap; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; margin-bottom: 8px; cursor: pointer; box-shadow: var(--shadow); transition: border-color .12s, transform .12s; }
+.card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.card.sel { border-color: var(--accent); }
+.card.alert { border-left: 3px solid var(--block); }
+.card.parkd { border-left: 3px solid var(--park); }
+.card .row1 { display: flex; gap: 6px; align-items: baseline; }
+.card .nn { font-family: var(--mono); color: var(--faint); font-size: 11.5px; }
+.card .t { font-weight: 600; line-height: 1.3; }
+.chip { font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.badge { font-size: 10.5px; padding: 1px 6px; border-radius: 5px; font-weight: 550; }
+.b-from { background: var(--accent-soft); color: var(--accent); }
+.b-wait { background: var(--park-soft); color: var(--park); }
+.b-block { background: var(--panel-2); color: var(--muted); border: 1px dashed var(--line-2); }
+.b-red { background: var(--block-soft); color: var(--block); }
+.b-src { background: var(--panel-2); color: var(--muted); font-family: var(--mono); }
+.reason { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.35; }
+
+.stepper { display: flex; align-items: center; margin-top: 9px; }
+.st { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: none; }
+.st .d { width: 12px; height: 12px; border-radius: 50%; background: var(--idle); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line-2); }
+.st small { font-size: 9.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.st.v-pass .d { background: var(--pass); box-shadow: 0 0 0 1px var(--pass); }
+.st.v-changes .d { background: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+.st.v-stuck .d { background: var(--block); box-shadow: 0 0 0 1px var(--block); }
+.st.v-live .d { background: var(--live); box-shadow: 0 0 0 1px var(--live); animation: dot 1.4s infinite; }
+@keyframes dot { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 18%, transparent); } }
+.stepper .ln { flex: 1; height: 2px; background: var(--line-2); margin: 0 3px 14px; min-width: 10px; }
+.stepper .rd { margin-left: 8px; font-size: 10.5px; color: var(--muted); margin-bottom: 14px; }
+.workers { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 7px; }
+.wk { display: flex; gap: 6px; align-items: center; font-size: 11.5px; min-width: 0; }
+.av { width: 18px; height: 18px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 9.5px; font-weight: 700; flex: none; }
+.wk span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+
+/* rail */
+.rail { border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 18px 16px 40px; min-width: 0; }
+.rail h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); display: flex; justify-content: space-between; }
+.rail section + section { margin-top: 24px; }
+.pane { border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; margin-bottom: 8px; cursor: pointer; }
+.pane:hover { background: var(--panel-2); }
+.pane .r1 { display: flex; align-items: center; gap: 7px; }
+.pane .r1 b { font-size: 12.5px; } .pane .r1 .mono { margin-left: auto; color: var(--faint); }
+.pane .act { font-family: var(--mono); font-size: 11.5px; margin-top: 6px; padding: 5px 7px; border-radius: 6px; background: var(--panel-2); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sev { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.sevb { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: none; text-align: left; cursor: pointer; }
+.sevb:hover, .sevb.on { background: var(--panel-2); }
+.sevb b { display: block; font-size: 18px; }
+.sevb small { font-size: 10.5px; font-weight: 650; letter-spacing: .05em; }
+.c-CRITICAL, .c-HIGH, .c-SPEC { color: var(--block); } .c-MEDIUM { color: var(--warn); } .c-LOW { color: var(--muted); }
+.flist { margin-top: 10px; }
+.find { font-size: 12px; padding: 8px 0; border-top: 1px solid var(--line); line-height: 1.4; overflow-wrap: anywhere; }
+.find.click { cursor: pointer; } .find.click:hover { color: var(--accent); }
+.find .who { font-size: 11px; color: var(--faint); margin-bottom: 2px; }
+.feed { font-size: 12px; }
+.feed div { display: grid; grid-template-columns: 42px 24px 1fr; gap: 4px; padding: 5px 0; border-top: 1px solid var(--line); }
+
+/* graph + timeline */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); overflow: auto; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-bottom: 12px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+svg text { font-family: system-ui, sans-serif; }
+.gnode { cursor: pointer; }
+.tl { display: grid; grid-template-columns: 180px 1fr; font-size: 12px; min-width: 560px; }
+.tl .lab { padding: 6px 10px 6px 0; border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.tl .trk { position: relative; border-top: 1px solid var(--line); height: 30px; }
+.tl .seg { position: absolute; top: 7px; height: 16px; border-radius: 4px; opacity: .9; min-width: 3px; }
+.tl .seg.live { background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgba(255,255,255,.28) 6px 12px); animation: slide 1s linear infinite; background-size: 17px 17px; }
+@keyframes slide { to { background-position: 17px 0; } }
+.tl .axis { position: relative; height: 22px; grid-column: 2; }
+.tl .axis span { position: absolute; font-size: 10.5px; color: var(--faint); transform: translateX(-50%); white-space: nowrap; }
+.tl .now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--block); opacity: .6; }
+
+/* drawer */
+.scrim { position: fixed; inset: 0; background: rgba(10,12,16,.35); opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 50; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(660px, 94vw); background: var(--panel); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg); transform: translateX(102%); transition: transform .2s ease; z-index: 60; overflow: auto; padding: 22px 26px 60px; }
+.open .scrim { opacity: 1; pointer-events: auto; } .open .drawer { transform: none; }
+.drawer .x { position: absolute; top: 16px; right: 18px; border: 1px solid var(--line); background: var(--panel-2); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
+.drawer h2 { margin: 2px 0 6px; font-size: 18px; padding-right: 40px; }
+.drawer h4 { margin: 22px 0 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); display: flex; justify-content: space-between; }
+.callout { border-radius: 9px; padding: 10px 12px; font-size: 12.5px; margin-top: 12px; }
+.callout.red { background: var(--block-soft); color: var(--block); } .callout.violet { background: var(--park-soft); color: var(--park); }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); }
+td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.v { font-size: 11px; font-weight: 650; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+.v-pass { color: var(--pass); background: var(--pass-soft); } .v-changes { color: var(--warn); background: var(--warn-soft); }
+.v-stuck { color: var(--block); background: var(--block-soft); } .v-live { color: var(--live); background: var(--live-soft); }
+.link { all: unset; cursor: pointer; font: 11.5px var(--mono); color: var(--accent); }
+.link:hover { text-decoration: underline; }
+pre.file { margin: 6px 0 2px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; font: 11.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; color: var(--text); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.gallery figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); cursor: zoom-in; }
+.gallery img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; }
+.gallery figcaption { font-size: 11px; color: var(--muted); padding: 5px 8px; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kv div { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+.kv b { display: block; font-size: 16px; } .kv small { color: var(--muted); font-size: 11px; }
+.plus { color: var(--pass); } .minus { color: var(--block); }
+ul.plain { list-style: none; padding: 0; margin: 0; }
+ul.plain li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.lightbox { position: fixed; inset: 0; z-index: 80; background: rgba(8,10,14,.82); display: none; place-items: center; cursor: zoom-out; padding: 30px; }
+.lightbox.on { display: grid; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: var(--shadow-lg); background: #fff; }
+
+@media (max-width: 1240px) { .app { grid-template-columns: 220px minmax(0, 1fr) 260px; } .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1060px) { .app { grid-template-columns: 200px minmax(0, 1fr); } .rail { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><div class="logo">k</div><div><b id="repo">kal</b><small>kal board</small></div></div>
+    <h6>Runs</h6>
+    <div class="runs" id="runs"></div>
+    <div class="livei" id="livei"><span class="ldot"></span><span>connecting…</span></div>
+  </aside>
+  <main class="main">
+    <div class="head" id="head"></div>
+    <div class="view" id="view"></div>
+  </main>
+  <aside class="rail" id="rail"></aside>
+</div>
+<div id="dr"><div class="scrim" data-close></div><div class="drawer" id="drawer"></div></div>
+<div class="lightbox" id="lb"><img alt="screenshot"></div>
+
+<script>
+let S = null, sig = "", lastDraw = 0, NOW = Date.now();
+const ui = { sev: null, files: {}, open: new Set() };  // files: path -> text or a pending Promise; open: paths shown inline
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const arr = (x) => Array.isArray(x) ? x : [];
+const fileUrl = (p) => "files/" + String(p).split("/").map(encodeURIComponent).join("/");
+const shotUrl = (p) => String(p).startsWith("data:") ? p : fileUrl(p);
+const tm = (s) => (s ? Date.parse(String(s).length === 16 ? String(s).replace(" ", "T") + ":00" : String(s).replace(" ", "T")) : NaN);
+const ROLE_COLOR = { developer: "var(--dev)", reviewer: "var(--rev)", qa: "var(--qa)", security: "var(--sec)", "bug-fixer": "var(--fix)", merger: "var(--mrg)" };
+const ROLE_SHORT = { developer: "D", reviewer: "R", qa: "Q", security: "S", "bug-fixer": "F", merger: "M" };
+const STATE_LABEL = { active: "Active", "paused-finishing": "Pausing", paused: "Paused", "needs-you": "Needs you", finished: "Finished", stopped: "Stopped" };
+const SEVS = ["CRITICAL", "HIGH", "SPEC", "MEDIUM", "LOW"];
+const LANES = ["Needs you", "Ready", "Waiting on blockers", "In dev", "Checks", "Fixing", "Parked", "Merged"];
+
+function dur(sec) {
+  if (sec == null || isNaN(sec)) return "—";
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return sec + "s";
+  const m = Math.floor(sec / 60); if (m < 60) return m + "m " + String(sec % 60).padStart(2, "0") + "s";
+  const h = Math.floor(m / 60); return h + "h " + String(m % 60).padStart(2, "0") + "m";
+}
+const since = (s) => isNaN(tm(s)) ? "—" : dur((NOW - tm(s)) / 1000);
+function elapsed(run) { const a = tm(run.started), b = run.finished ? tm(run.finished) : NOW; return isNaN(a) ? "—" : dur((b - a) / 1000); }
+const vclass = (v) => !v ? "" : ["PASS", "READY", "FIXED", "MERGED"].includes(v) ? "pass" : v === "CHANGES" ? "changes" : "stuck";
+const statePill = (s) => `<span class="pill s-${esc(s)}">${STATE_LABEL[s] || esc(s)}</span>`;
+
+/* ---------- data ---------- */
+// Every field defaulted, so a half-written Run file never breaks the page.
+function norm(st) {
+  st.runs = arr(st.runs).map((r) => ({
+    ...r, counts: { total: 0, merged: 0, needs_you: 0, live: 0, developers: 0, slots: 3, ...(r.counts || {}) },
+    findings: r.findings || {}, feed: arr(r.feed),
+    tickets: arr(r.tickets).map((t) => ({
+      ...t, title: t.title || t.nn, blocked_by: arr(t.blocked_by), waits_on: arr(t.waits_on),
+      shots: arr(t.shots), verify: arr(t.verify), log: arr(t.log), workers: arr(t.workers),
+      diff: { files: 0, insertions: 0, deletions: 0, ...(t.diff || {}), commits: arr(t.diff?.commits) },
+      steps: arr(t.steps).map((s) => ({ ...s, findings: arr(s.findings) })),
+    })),
+  }));
+  return st;
+}
+async function poll() {
+  try {
+    const res = await fetch("state.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    const st = norm(await res.json());
+    document.body.classList.remove("down");
+    $("#livei").innerHTML = `<span class="ldot"></span><span>live · updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>`;
+    const s = JSON.stringify({ ...st, generated: 0 });
+    // Redraw when the state changed, and every 15s anyway so running times keep ticking.
+    if (s !== sig || Date.now() - lastDraw > 15000) { S = st; sig = s; draw(); }
+  } catch (e) {
+    document.body.classList.add("down");
+    $("#livei").innerHTML = `<span class="ldot"></span><span>offline since ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>`;
+  }
+}
+
+/* ---------- routing: #run=<feature>&tab=<lanes|graph|timeline>&t=<NN> ---------- */
+const hash = () => { const h = new URLSearchParams(location.hash.slice(1)); return { run: h.get("run"), tab: h.get("tab") || "lanes", t: h.get("t") }; };
+function go(patch) {
+  const h = { ...hash(), ...patch }, q = new URLSearchParams();
+  if (h.run) q.set("run", h.run); if (h.tab && h.tab !== "lanes") q.set("tab", h.tab); if (h.t) q.set("t", h.t);
+  location.hash = q.toString();
+}
+const runOf = () => S && (S.runs.find((r) => r.feature === hash().run) || S.runs[0]) || null;
+
+/* ---------- lanes + cards ---------- */
+function laneOf(t, run) {
+  const merged = new Set(run.tickets.filter((x) => ["merged", "dropped"].includes(x.status)).map((x) => x.nn));
+  if (t.status === "ready") return t.blocked_by.every((b) => merged.has(b)) ? "Ready" : "Waiting on blockers";
+  return { "in-dev": "In dev", "in-review": "Checks", "ready-to-merge": "Checks", fixing: "Fixing", parked: "Parked",
+    "needs-you": "Needs you", merged: "Merged", dropped: "Merged" }[t.status] || "Ready";
+}
+function stages(t) {
+  // dev → checks → fix → merge: each stage's dot shows its newest step.
+  const by = (pred) => t.steps.filter(pred).slice(-1)[0];
+  const checkSteps = t.steps.filter((s) => ["reviewer", "qa", "security"].includes(s.role));
+  const lastRound = checkSteps.length ? Math.max(...checkSteps.map((s) => s.round)) : 0;
+  const cur = checkSteps.filter((s) => s.round === lastRound);
+  let check = null;
+  if (cur.length) check = cur.some((s) => !s.verdict) ? { live: true } : { verdict: cur.some((s) => s.verdict === "CHANGES") ? "CHANGES" : "PASS" };
+  const pick = (s) => s ? (s.verdict ? { verdict: s.verdict } : { live: true }) : null;
+  return [
+    ["dev", pick(by((s) => s.role === "developer"))],
+    ["checks", check],
+    ["fix", pick(by((s) => s.role === "bug-fixer" || s.role === "merger"))],
+    ["merge", t.status === "merged" ? { verdict: "MERGED" } : null],
+  ];
+}
+function stepper(t) {
+  return `<div class="stepper">${stages(t).map(([n, s], i) =>
+    `${i ? '<span class="ln"></span>' : ""}<div class="st ${s ? (s.live ? "v-live" : "v-" + vclass(s.verdict)) : ""}"><span class="d"></span><small>${n}</small></div>`
+  ).join("")}${t.round > 1 ? `<span class="rd">R${t.round}</span>` : ""}</div>`;
+}
+function badges(t, run, src) {
+  const merged = new Set(run.tickets.filter((x) => ["merged", "dropped"].includes(x.status)).map((x) => x.nn));
+  const out = [];
+  if (t.discovered_from) out.push(`<span class="badge b-from">from ${esc(t.discovered_from)}</span>`);
+  if (t.waits_on.length) out.push(`<span class="badge b-wait">waits on ${esc(t.waits_on.join(", "))}</span>`);
+  const open = t.blocked_by.filter((b) => !merged.has(b));
+  if (open.length && t.status !== "merged") out.push(`<span class="badge b-block">blocked by ${esc(open.join(", "))}</span>`);
+  if (t.verify.length && !t.verify[t.verify.length - 1].passed) out.push(`<span class="badge b-red">verify red</span>`);
+  if (src && t.source) out.push(`<span class="badge b-src">${esc(t.source)}</span>`);
+  return out.length ? `<div class="badges">${out.join("")}</div>` : "";
+}
+const titleOf = (t, run) => t.nn === "00" ? "End of spec" : t.title;
+function card(t, run, sel) {
+  const live = t.workers.filter((w) => w.open);
+  return `<div class="card ${t.status === "needs-you" ? "alert" : t.status === "parked" ? "parkd" : ""} ${sel ? "sel" : ""}" data-nn="${esc(t.nn)}">
+    <div class="row1"><span class="nn">${esc(t.nn)}</span><span class="t">${esc(titleOf(t, run))}</span></div>
+    <div style="display:flex;gap:5px;margin-top:6px">${t.size ? `<span class="chip">${esc(t.size)}</span>` : ""}${t.diff.files ? `<span class="chip"><span class="plus">+${t.diff.insertions}</span> <span class="minus">−${t.diff.deletions}</span></span>` : ""}</div>
+    ${stepper(t)}${badges(t, run)}
+    ${t.reason ? `<div class="reason">${esc(t.reason)}</div>` : ""}
+    ${live.length ? `<div class="workers">${live.map((w) => `<div class="wk"><span class="av" style="background:${ROLE_COLOR[w.role] || "var(--muted)"}">${ROLE_SHORT[w.role] || "?"}</span><span>${esc(w.action || w.role)}</span></div>`).join("")}</div>` : ""}
+  </div>`;
+}
+function renderLanes(run) {
+  const groups = Object.fromEntries(LANES.map((l) => [l, []]));
+  run.tickets.forEach((t) => groups[laneOf(t, run)].push(t));
+  const sel = hash().t;
+  return `<div class="lane-scroll" id="ls"><div class="lanes">${LANES.map((l) => groups[l].length
+    ? `<div class="lane"><header>${l}<span>${groups[l].length}</span></header>${groups[l].map((t) => card(t, run, t.nn === sel)).join("")}</div>`
+    : `<div class="lane slim" title="${l}: none"><header>${l}<span>0</span></header></div>`).join("")}</div></div>`;
+}
+
+/* ---------- dependencies + timeline ---------- */
+function renderGraph(run) {
+  const ts = run.tickets.filter((t) => t.nn !== "00");
+  if (!ts.length) return `<div class="panel empty-note">No tickets yet.</div>`;
+  const by = Object.fromEntries(ts.map((t) => [t.nn, t]));
+  const deps = (t) => [...t.blocked_by, ...t.waits_on].filter((n) => by[n]);
+  const depth = {};
+  const d = (n, seen = new Set()) => { if (depth[n] != null) return depth[n]; if (seen.has(n)) return 0; seen.add(n);
+    return depth[n] = deps(by[n]).reduce((m, p) => Math.max(m, d(p, seen) + 1), 0); };
+  ts.forEach((t) => d(t.nn));
+  const cols = {}; ts.forEach((t) => (cols[depth[t.nn]] ||= []).push(t));
+  const W = 210, H = 64, GX = 70, GY = 22, pos = {};
+  Object.entries(cols).forEach(([c, list]) => list.forEach((t, i) => pos[t.nn] = { x: 20 + c * (W + GX), y: 20 + i * (H + GY) }));
+  const maxC = Math.max(...Object.keys(cols).map(Number)), maxR = Math.max(...Object.values(cols).map((l) => l.length));
+  const fill = { merged: "var(--pass-soft)", dropped: "var(--panel-2)", "needs-you": "var(--block-soft)", parked: "var(--park-soft)",
+    "in-dev": "var(--live-soft)", "in-review": "var(--live-soft)", fixing: "var(--warn-soft)", ready: "var(--panel)" };
+  const stroke = { merged: "var(--pass)", "needs-you": "var(--block)", parked: "var(--park)", "in-dev": "var(--live)", "in-review": "var(--live)", fixing: "var(--warn)" };
+  const edges = ts.flatMap((t) => deps(t).map((p) => {
+    const a = pos[p], b = pos[t.nn], x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2, wait = t.waits_on.includes(p);
+    return `<path d="M${x1},${y1} C${x1 + GX / 2},${y1} ${x2 - GX / 2},${y2} ${x2 - 6},${y2}" fill="none" stroke="${wait ? "var(--park)" : "var(--line-2)"}" stroke-width="1.6" ${wait ? 'stroke-dasharray="5 4"' : ""} marker-end="url(#ar)"/>`;
+  }));
+  const nodes = ts.map((t) => { const p = pos[t.nn], live = t.workers.some((w) => w.open);
+    return `<g class="gnode" data-nn="${esc(t.nn)}"><title>${esc(t.nn + " " + t.title)}</title><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="10" fill="${fill[t.status] || "var(--panel)"}" stroke="${stroke[t.status] || "var(--line-2)"}" stroke-width="${live ? 2 : 1}"/>
+      <text x="${p.x + 12}" y="${p.y + 22}" font-size="11" fill="var(--faint)">${esc(t.nn)} · ${esc(t.status)}${live ? " · live" : ""}</text>
+      <text x="${p.x + 12}" y="${p.y + 42}" font-size="13" font-weight="600" fill="var(--text)">${esc(t.title.length > 26 ? t.title.slice(0, 25) + "…" : t.title)}</text>
+      ${live ? `<circle cx="${p.x + W - 14}" cy="${p.y + 16}" r="4" fill="var(--live)"><animate attributeName="opacity" values="1;.3;1" dur="1.4s" repeatCount="indefinite"/></circle>` : ""}</g>`; });
+  return `<div class="panel"><div class="legend"><span><i style="background:var(--pass)"></i>merged</span><span><i style="background:var(--live)"></i>in progress</span>
+    <span><i style="background:var(--warn)"></i>fixing</span><span><i style="background:var(--park)"></i>parked (dashed: waits on)</span><span><i style="background:var(--block)"></i>needs you</span></div>
+    <svg width="${40 + (maxC + 1) * (W + GX)}" height="${40 + maxR * (H + GY)}"><defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"/></marker></defs>${edges.join("")}${nodes.join("")}</svg></div>`;
+}
+function renderTimeline(run) {
+  const rows = run.tickets.filter((t) => t.steps.some((s) => !isNaN(tm(s.started))));
+  if (!rows.length) return `<div class="panel empty-note">Nothing has run yet.</div>`;
+  const all = rows.flatMap((t) => t.steps.filter((s) => !isNaN(tm(s.started))));
+  const t0 = Math.min(...all.map((s) => tm(s.started)));
+  const t1 = Math.max(...all.map((s) => s.ended ? tm(s.ended) : NOW), run.finished ? 0 : NOW);
+  const span = Math.max(t1 - t0, 60000), x = (t) => ((t - t0) / span * 100).toFixed(2) + "%";
+  const ticks = Array.from({ length: 6 }, (_, i) => t0 + span * i / 5);
+  const fmt = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `<div class="panel"><div class="legend">${Object.entries(ROLE_COLOR).map(([r, c]) => `<span><i style="background:${c}"></i>${r}</span>`).join("")}</div>
+    <div class="tl"><div></div><div class="axis">${ticks.map((t) => `<span style="left:${x(t)}">${fmt(t)}</span>`).join("")}</div>
+    ${rows.map((t) => `<div class="lab" data-nn="${esc(t.nn)}"><span class="mono faint">${esc(t.nn)}</span> ${esc(titleOf(t, run))}</div>
+      <div class="trk">${t.steps.filter((s) => !isNaN(tm(s.started))).map((s) => { const a = tm(s.started), b = s.ended ? tm(s.ended) : NOW;
+        return `<div class="seg ${s.ended ? "" : "live"}" title="${esc(s.name)} r${s.round} ${esc(s.verdict || "running")} · ${dur((b - a) / 1000)}" style="left:${x(a)};width:calc(${x(b)} - ${x(a)});background:${ROLE_COLOR[s.role] || "var(--muted)"}"></div>`; }).join("")}
+        ${run.finished ? "" : `<div class="now" style="left:${x(NOW)}"></div>`}</div>`).join("")}</div></div>`;
+}
+
+/* ---------- sidebar, header, rail ---------- */
+function renderRuns(cur) {
+  $("#repo").textContent = S.name || "kal";
+  $("#runs").innerHTML = S.runs.length ? S.runs.map((r) => {
+    const pct = r.counts.total ? r.counts.merged / r.counts.total * 100 : 0;
+    const ny = r.counts.total ? r.counts.needs_you / r.counts.total * 100 : 0;
+    return `<button class="run ${r === cur ? "on" : ""}" data-run="${esc(r.feature)}">
+      <div class="top"><span class="name">${esc(r.feature)}</span>${statePill(r.state)}</div>
+      <div class="meta">${r.counts.merged}/${r.counts.total} merged · ${esc(r.phase || "")} · ${elapsed(r)}</div>
+      <div class="bar"><i style="width:${pct}%;background:var(--pass)"></i><i style="width:${ny}%;background:var(--block)"></i></div>
+    </button>`;
+  }).join("") : `<div class="empty-note" style="padding:10px">No runs yet.</div>`;
+}
+function renderHead(run) {
+  const c = run.counts, tab = hash().tab;
+  const tabs = [["lanes", "Lanes", run.tickets.length], ["graph", "Dependencies", ""], ["timeline", "Timeline", ""]];
+  $("#head").innerHTML = `<p class="offline">Board server unreachable: showing the last state it sent. It reconnects by itself; restart it with <span class="mono">kal-board</span> if it stays down.</p>
+    <div class="title"><h1>${esc(run.feature)}</h1>${statePill(run.state)}
+      <span class="branch">${esc(run.base || "")}${run.target ? " → " + esc(run.target) : ""}</span>
+      <span class="muted" style="font-size:12px">${esc(run.mode || "")}</span></div>
+    <div class="stats">
+      <div class="stat"><label>Merged</label><b>${c.merged}<small> / ${c.total}</small></b></div>
+      <div class="stat"><label>Live workers</label><b>${c.live}</b><span class="slots" title="developer slots in use">${Array.from({ length: c.slots || 3 }, (_, i) => `<i class="${i < c.developers ? "on" : ""}"></i>`).join("")}</span></div>
+      <div class="stat"><label>Needs you</label><b style="color:${c.needs_you ? "var(--block)" : "inherit"}">${c.needs_you}</b></div>
+      <div class="stat"><label>${run.finished ? "Took" : "Elapsed"}</label><b>${elapsed(run)}</b></div>
+      <div class="stat"><label>Phase</label><b style="font-size:15px">${esc(run.phase || "—")}</b></div>
+      <div class="stat"><label>Orchestrator context</label><b style="font-size:15px">${esc(run.context || "—")}</b></div>
+    </div>
+    <div class="tabs">${tabs.map(([k, l, n]) => `<button class="tab ${tab === k ? "on" : ""}" data-tab="${k}">${l}${n !== "" ? `<span>${n}</span>` : ""}</button>`).join("")}</div>`;
+}
+function renderRail(run) {
+  const live = run.tickets.flatMap((t) => t.workers.filter((w) => w.open).map((w) => ({ ...w, t })));
+  const finds = run.tickets.flatMap((t) => t.steps.flatMap((s) => s.findings.map((f) => ({ ...f, t, s }))));
+  const counts = Object.fromEntries(SEVS.map((s) => [s, finds.filter((f) => f.severity === s).length]));
+  const shown = ui.sev ? finds.filter((f) => f.severity === ui.sev) : [];
+  $("#rail").innerHTML = `
+    <section><h3>Live panes <span>${live.length}</span></h3>
+      ${live.length ? live.map((w) => `<div class="pane" data-nn="${esc(w.t.nn)}">
+        <div class="r1"><span class="av" style="background:${ROLE_COLOR[w.role] || "var(--muted)"}">${ROLE_SHORT[w.role] || "?"}</span><b>${esc(w.role)}</b><span class="muted" style="font-size:11.5px">${esc(w.model || "")}</span><span class="mono">${esc(w.t.nn)} · ${since(w.since)}</span></div>
+        <div class="act" title="${esc(w.action || "")}">${esc(w.action || "starting…")}</div></div>`).join("") : `<div class="empty-note">No workers running.</div>`}</section>
+    <section><h3>Findings <span>${finds.length}</span></h3>
+      ${finds.length ? `<div class="sev">${SEVS.filter((s) => counts[s]).map((s) => `<button class="sevb ${ui.sev === s ? "on" : ""}" data-sev="${s}"><b class="c-${s}">${counts[s]}</b><small class="c-${s}">${s}</small></button>`).join("")}</div>
+        <div class="flist">${shown.map((f) => `<div class="find click" data-nn="${esc(f.t.nn)}"><div class="who">${esc(f.t.nn)} · ${esc(f.s.name)} · round ${f.s.round}${f.blocking ? " · blocking" : ""}</div>${esc(f.text)}</div>`).join("")}</div>`
+        : `<div class="empty-note">No findings.</div>`}</section>
+    <section><h3>Activity <span>${run.feed.length}</span></h3><div class="feed">${run.feed.slice(0, 20).map((e) => `<div><span class="faint mono">${esc(String(e.time || "").slice(11))}</span><span class="mono faint">${esc(e.ticket || "")}</span><span>${esc(e.text)}</span></div>`).join("") || `<div class="empty-note">No activity.</div>`}</div></section>`;
+}
+
+/* ---------- ticket drawer ---------- */
+function fileBlock(path) {
+  if (!ui.open.has(path)) return "";
+  return `<pre class="file">${typeof ui.files[path] === "string" ? esc(ui.files[path]) : "loading…"}</pre>`;
+}
+function toggleFile(path) {
+  if (ui.open.has(path)) ui.open.delete(path);
+  else {
+    ui.open.add(path);
+    if (!ui.files[path]) ui.files[path] = fetch(fileUrl(path), { cache: "no-store" })
+      .then((r) => r.ok ? r.text() : `(not available: HTTP ${r.status})`).catch(() => "(board server unreachable)")
+      .then((t) => { ui.files[path] = t; drawDrawer(true); });
+  }
+  drawDrawer(true);
+}
+function drawerHtml(run, t) {
+  const finds = t.steps.flatMap((s) => s.findings.map((f) => ({ ...f, s })));
+  const live = t.workers.filter((w) => w.open);
+  const fileLink = (p, label) => `<button class="link" data-file="${esc(p)}">${ui.open.has(p) ? "▾" : "▸"} ${esc(label)}</button>${fileBlock(p)}`;
+  return `<button class="x" data-close aria-label="Close">✕</button>
+    <div class="mono faint">${esc(t.nn)} · ${esc(t.status)}${t.size ? " · " + esc(t.size) : ""} · ${esc(t.branch || "")}</div>
+    <h2>${esc(t.nn === "00" ? "End of spec: " + run.feature : t.title)}</h2>
+    ${stepper(t)}${badges(t, run, true)}
+    ${t.reason ? `<div class="callout ${t.status === "parked" ? "violet" : "red"}">${esc(t.reason)}</div>` : ""}
+    ${live.length ? `<h4>Live now</h4><ul class="plain">${live.map((w) => `<li><b>${esc(w.role)}</b> <span class="muted">${esc(w.model || "")} · pane ${esc(w.pane || "")} · ${since(w.since)}</span><div class="mono muted" style="margin-top:3px">${esc(w.action || "starting…")}</div></li>`).join("")}</ul>` : ""}
+    <h4>Steps <span>${t.steps.length}</span></h4>${t.steps.length ? `<table><tr><th>Round</th><th>Worker</th><th>Verdict</th><th>Took</th><th>Outcome</th></tr>
+      ${t.steps.map((s) => `<tr><td class="mono">${s.round}</td><td>${esc(s.name)}</td><td><span class="v v-${s.verdict ? vclass(s.verdict) : "live"}">${esc(s.verdict || "running")}</span></td>
+        <td class="mono">${s.seconds != null ? dur(s.seconds) : since(s.started)}</td>
+        <td>${esc(s.summary)}${s.report ? `<div style="margin-top:3px">${fileLink(s.report, s.report.split("/").slice(-2).join("/"))}</div>` : ""}</td></tr>`).join("")}</table>` : `<div class="empty-note">Not started.</div>`}
+    <h4>Findings <span>${finds.length}</span></h4>${finds.length ? finds.map((f) => `<div class="find"><div class="who"><b class="c-${esc(f.severity)}">${esc(f.severity)}</b> · ${esc(f.s.name)} round ${f.s.round}${f.blocking ? " · blocking" : ""}</div>${esc(f.text)}</div>`).join("") : `<div class="empty-note">None.</div>`}
+    <h4>QA screenshots <span>${t.shots.length}</span></h4><div id="gal"></div>
+    <h4>Tests and diff</h4>
+    <div class="kv"><div><b>${t.diff.files}</b><small>files</small></div><div><b class="plus">+${t.diff.insertions}</b><small>added</small></div><div><b class="minus">−${t.diff.deletions}</b><small>removed</small></div></div>
+    ${t.verify.length ? `<ul class="plain" style="margin-top:10px">${t.verify.map((v) => `<li><span class="v ${v.passed ? "v-pass" : "v-stuck"}">${v.passed ? "PASS" : "FAIL"}</span> <span class="mono">verify @ ${esc(v.sha)}</span> <span class="muted">round ${v.round}</span>${v.log ? ` ${fileLink(v.log, "log")}` : ""}</li>`).join("")}</ul>` : `<div class="empty-note">No verify runs yet.</div>`}
+    ${t.diff.commits.length ? `<ul class="plain" style="margin-top:10px">${t.diff.commits.map(([h, m]) => `<li><span class="mono faint">${esc(h)}</span> ${esc(m)}</li>`).join("")}</ul>` : ""}
+    <h4>Log <span>${t.log.length}</span></h4>${t.log.length ? `<ul class="plain">${[...t.log].reverse().map((l) => `<li><span class="mono faint">${esc(String(l).slice(11, 16))}</span> ${esc(String(l).slice(17))}</li>`).join("")}</ul>` : `<div class="empty-note">No log lines.</div>`}`;
+}
+let drawerSig = "", galSig = "";
+function drawDrawer(force) {
+  const run = runOf(), nn = hash().t, t = run && run.tickets.find((x) => x.nn === nn);
+  const box = $("#drawer");
+  if (!t) { $("#dr").classList.remove("open"); drawerSig = ""; return; }
+  $("#dr").classList.add("open");
+  const s = JSON.stringify(t) + [...ui.open].join() + Object.keys(ui.files).filter((k) => typeof ui.files[k] === "string").join();
+  if (!force && s === drawerSig) return;  // unchanged: leave it alone, so scroll and images stay put
+  drawerSig = s;
+  const top = box.scrollTop, gal = $("#gal");
+  const keep = gal && galSig === t.nn + t.shots.join("|") ? gal : null;  // same screenshots: keep the loaded <img>s
+  box.innerHTML = drawerHtml(run, t);
+  if (keep) $("#gal").replaceWith(keep);
+  else {
+    galSig = t.nn + t.shots.join("|");
+    $("#gal").innerHTML = t.shots.length ? `<div class="gallery">${t.shots.map((p, i) => `<figure data-src="${esc(shotUrl(p))}"><img loading="lazy" src="${esc(shotUrl(p))}" alt="QA screenshot ${i + 1}"><figcaption>${esc(String(p).startsWith("data:") ? `Criterion ${i + 1}` : String(p).split("/").pop())}</figcaption></figure>`).join("")}</div>` : `<div class="empty-note">No screenshots.</div>`;
+  }
+  box.scrollTop = top;
+}
+
+/* ---------- draw ---------- */
+function fade() { const ls = $("#ls"); if (ls) ls.classList.toggle("at-end", ls.scrollLeft + ls.clientWidth >= ls.scrollWidth - 4); }
+function draw() {
+  if (!S) return;
+  NOW = Date.now(); lastDraw = NOW;
+  const run = runOf();
+  renderRuns(run);
+  if (!run) {
+    $("#head").innerHTML = `<p class="offline">Board server unreachable: showing the last state it sent.</p>`;
+    $("#view").innerHTML = `<div class="hero"><h2>No Runs yet</h2><div class="muted">Runs appear here when <span class="mono">/kal:build</span> or <span class="mono">/kal:build-spec</span> starts.</div></div>`;
+    $("#rail").innerHTML = "";
+    return drawDrawer(false);
+  }
+  const ls = $("#ls"), left = ls ? ls.scrollLeft : 0, vtop = $("#view").scrollTop;
+  renderHead(run); renderRail(run);
+  const tab = hash().tab;
+  $("#view").innerHTML = tab === "graph" ? renderGraph(run) : tab === "timeline" ? renderTimeline(run) : renderLanes(run);
+  $("#view").scrollTop = vtop;
+  if ($("#ls")) { $("#ls").scrollLeft = left; $("#ls").addEventListener("scroll", fade); fade(); }
+  drawDrawer(false);
+}
+
+/* one delegated click handler, so redraws never need rewiring */
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-close], [data-file], [data-sev], [data-src], [data-tab], [data-run], [data-nn]");
+  if (!el) return;
+  if ("close" in el.dataset) return go({ t: null });
+  if (el.dataset.file) return toggleFile(el.dataset.file);
+  if (el.dataset.sev) { ui.sev = ui.sev === el.dataset.sev ? null : el.dataset.sev; return renderRail(runOf()); }
+  if (el.dataset.src) { const lb = $("#lb"); lb.querySelector("img").src = el.dataset.src; return lb.classList.add("on"); }
+  if (el.dataset.tab) return go({ tab: el.dataset.tab });
+  if (el.dataset.run) { ui.sev = null; return go({ run: el.dataset.run, t: null }); }
+  if (el.dataset.nn) return go({ run: runOf()?.feature, t: el.dataset.nn });
+});
+$("#lb").addEventListener("click", () => $("#lb").classList.remove("on"));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ($("#lb").classList.contains("on")) $("#lb").classList.remove("on"); else if (hash().t) go({ t: null });
+});
+window.addEventListener("hashchange", draw);
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@ A Claude Code plugin for planning a feature with you, then building it AFK.
 
 - **Plan** interactively. Every question arrives as a multiple-choice prompt with a recommended answer.
 - **Spec and slice** the plan into tickets with blocking edges.
-- **Build** with role agents (developer, reviewer, QA, security, bug-fixer, merger), each in its own tmux pane. `/kal:build` and `/kal:build-spec` work today; the dashboard is in progress (see [PLAN.md](PLAN.md), section 14).
+- **Build** with role agents (developer, reviewer, QA, security, bug-fixer, merger), each in its own tmux pane. `/kal:build` and `/kal:build-spec` work today, with a live local dashboard.
 
 ## Install
 
@@ -39,6 +39,7 @@ Skills the agents load themselves: `interrogate`, `domain-language`, `investigat
 ## While a build runs
 
 - **Watch:** the orchestrator's pane on the left, one pane per live worker on the right (each closes when done). Run state lives in `.kal/runs/<feature>/`.
+- **Dashboard:** every build prints a `Board:` URL (one per repo, `http://127.0.0.1:4100/` by default; `kal-board` prints it any time). It shows every Run: status lanes with a pipeline stepper per ticket, the dependency graph, a timeline of every worker, live panes with each worker's latest action, findings by severity, and a drawer per ticket with its reports, screenshots, verify logs, diff and log. Read-only; it refreshes every 2 seconds.
 - **Pause:** `touch .kal/runs/<feature>/pause`. Live workers finish their current step, then the Run stops. Run the same command again to resume.
 - **Resume after a crash or closed terminal:** run the same command again; it picks up from `.kal/runs/<feature>/`.
 - **You're asked only when needed:** a ticket that's stuck after 2 fix rounds, a spec conflict, or the final hand-off. Everything else keeps moving meanwhile, and you get a desktop notification.

@@ -77,6 +77,9 @@ if a.merge_into and run("git", "branch", "-d", integration, cwd=repo).returncode
 
 where = f"merged into {a.merge_into} at {git('rev-parse', '--short', 'HEAD', cwd=trees[a.merge_into])}" \
     if a.merge_into else f"kept as {integration} at {head[:7]}"
+final = run_dir / "tickets" / "00-final.md"
+if final.is_file():
+    subprocess.run([str(HERE / "kal-set"), str(final), "Status=merged", "Workers=", "--log", where], check=True)
 subprocess.run([str(HERE / "kal-set"), str(run_dir / "run.md"), "Phase=done", f"Finished={time.strftime('%Y-%m-%d %H:%M')}",
                 "--log", where], check=True)
 print(f"finished {run_dir.name}: {where}" + "".join(f"; {n}" for n in notes))

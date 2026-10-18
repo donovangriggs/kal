@@ -257,7 +257,7 @@ Every created ticket goes to the tracker, the run's graph and the board, where i
   - **Findings** by severity, with click-through to the full report.
   - **QA gallery:** screenshots per acceptance criterion, plus the end-of-spec breakpoint shots.
   - **Tests and diff:** verify results, files changed, lines added/removed, commits.
-- **The look gets decided with `/kal:prototype`:** 3 structurally different variants fed by fake run data, before the real build.
+- **The look was decided with `/kal:prototype`:** 3 variants fed by real Run data plus a synthetic mid-run feature. A ("Mission control") won, with empty lanes collapsed so populated ones fit. The variants are kept on the throwaway branch `prototype/board`.
 
 **Notifications:** macOS notifications (`osascript`) when a run finishes, needs you, or its final review fails. Fallback: `tmux display-message`.
 
@@ -314,6 +314,7 @@ Each milestone is usable on its own:
 
 ## 16. Status
 
+- Milestone 4 (the Board) is done: `bin/kal-board`, `board/state.py`, `board/index.html`. It was verified against real Runs, including a live worker's latest action.
 - Milestones 1 to 3 are done and verified live in tmux: `/kal:build` on one ticket (including STUCK, needs-you and resume from a retry note), and `/kal:build-spec` on a 3-ticket spec (parallel developers, a blocker releasing, the trivial fast path, the end of spec, the hand-off question, and merging to main with cleanup).
 - Covered by unit tests, but not yet exercised live: pause and resume between features, discovered tickets and parking, the context relay, and the startup-prompt kill.
 - Changes from the plan made during the build:

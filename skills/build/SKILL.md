@@ -42,7 +42,8 @@ You are the **orchestrator** of a **Run** that carries one ticket from ready to 
    - **Exit 3:** setup is missing. Tell the user to run `/kal:setup` and stop.
    - **Exit 4:** another Run is active in this repo. Ask: pause it (recommended) / stop. To pause, run `touch <its run dir>/pause`, then tell the user to run this command again once its panes have closed. Then stop.
    - **Exit 0:** `first start`, `resume` or `finished`. On `finished`, say so and stop.
-4. Run `kal-begin <ticket file>`. It cuts the branch and worktree from the base branch and readies dependencies. On a resume it just reports what's already there.
+4. Run `kal-board` and print the URL it prints, once: `Board: <url>`. The repo's dashboard shows the Run live. Don't repeat the URL later.
+5. Run `kal-begin <ticket file>`. It cuts the branch and worktree from the base branch and readies dependencies. On a resume it just reports what's already there.
 
 **On a resume**, read the mirror's `## Log` and the round folders under `.kal/runs/<feature>/reports/<NN>/`. Re-attach a waiter to each worker listed in `Workers:` (`kal-worker <role> <ticket> --attach <pane id>`, in the background), then continue from the status.
 

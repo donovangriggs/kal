@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""kal-board [<repo>] [--serve PORT]: make sure the repo's Board is up, and print its URL.
+
+One Board per repo, read-only. It serves the page (board/index.html), /state.json (board/state.py, rebuilt on
+every request, so it's always current) and /files/<path> (reports and screenshots, only from under .kal/). The
+port lives in .kal/board-port, from 4100 upward. A server already answering there for this repo is reused;
+otherwise a detached one starts (its own session, so it outlives the calling shell).
+Stop it with `lsof -ti tcp:<port> -sTCP:LISTEN | xargs kill`.
+"""
+import http.server
+import json
+import mimetypes
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "board"))
+
+
+def serve(repo, port):
+    from state import state
+
+    kal = (repo / ".kal").resolve()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def send(self, code, body, kind):
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/index.html"):
+                return self.send(200, (ROOT / "board" / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if path == "/state.json":
+                return self.send(200, json.dumps(state(repo)).encode(), "application/json")
+            if path.startswith("/files/"):
+                target = (repo / urllib.request.url2pathname(path[len("/files/"):])).resolve()
+                if target.is_file() and kal in target.parents:  # nothing outside .kal/ is ever served
+                    kind = mimetypes.guess_type(target.name)[0] or "text/plain; charset=utf-8"
+                    return self.send(200, target.read_bytes(), kind)
+            self.send(404, b"not found", "text/plain")
+
+    http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+def ours(port, repo):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/state.json", timeout=2) as r:
+            return json.loads(r.read()).get("repo") == str(repo)
+    except (OSError, ValueError):
+        return False
+
+
+def free(port):
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+args = sys.argv[1:]
+if args[:1] and args[0] != "--serve":
+    repo = Path(args.pop(0)).resolve()
+else:
+    repo = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                               capture_output=True, text=True).stdout.strip() or ".").resolve()
+    repo = repo.parent if repo.name == ".git" else repo
+if args[:1] == ["--serve"]:
+    serve(repo, int(args[1]))
+    sys.exit()
+
+port_file = repo / ".kal" / "board-port"
+port_file.parent.mkdir(parents=True, exist_ok=True)
+port = int(port_file.read_text().strip()) if port_file.is_file() and port_file.read_text().strip().isdigit() else 0
+if not (port and ours(port, repo)):
+    port = next(p for p in range(4100, 65536) if free(p))
+    subprocess.Popen([sys.executable, __file__, str(repo), "--serve", str(port)], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(50):
+        if ours(port, repo):
+            break
+        time.sleep(0.1)
+    else:
+        sys.exit(f"kal-board: the server on port {port} didn't come up")
+    port_file.write_text(f"{port}\n")
+print(f"http://127.0.0.1:{port}/")
