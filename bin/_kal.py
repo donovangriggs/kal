@@ -18,7 +18,11 @@ CHECKS = ("reviewer", "qa", "security")
 
 # Each Role's dev-server port as an offset in the Ticket's block, so Roles running side by side never collide.
 PORT_OFFSET = {"developer": 0, "bug-fixer": 0, "qa": 1, "reviewer": 2, "security": 3, "merger": 3}
-QA_BASELINE = 4  # QA's spare: a baseline server from the base branch's checkout
+QA_BASELINE = 4
+# Each Role's color, the Board's dark-mode palette (board/index.html --dev, --rev, ...: change both together).
+# kal-worker paints each Worker's tmux pane border and title with it.
+ROLE_COLOR = {"developer": "#8b85ff", "reviewer": "#3cc2c2", "qa": "#f0a43c", "security": "#ef6a8a",
+              "bug-fixer": "#a88bef", "merger": "#3fbf6a"}  # QA's spare: a baseline server from the base branch's checkout
 COMMAND_KEYS = ("Verify", "Dev server", "Teardown", "Worktree setup")
 
 

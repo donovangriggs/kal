@@ -39,7 +39,7 @@ import time
 import uuid
 from pathlib import Path
 
-from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROOT, Ticket, field, kal_loaded, stop, teardown, worktrees
+from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROLE_COLOR, ROOT, Ticket, field, kal_loaded, stop, teardown, worktrees
 
 NOTE = "A previous attempt at this step crashed or stalled. Read the branch and this round's reports first."
 GUARD = ROOT / "bin" / "_kal_guard.py"
@@ -186,6 +186,14 @@ else:
     pane = tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", os.environ["TMUX_PANE"], "-c", str(t.repo),
                 *(x for k, v in env.items() for x in ("-e", f"{k}={v}")), "sh", "-c", cmd)
     tmux("select-pane", "-t", pane, "-T", title)
+    # The Role's color, as on the Board: the pane's border, and its title through @kal_color (the orchestrator's
+    # pane has none, so it keeps tmux's default).
+    color = ROLE_COLOR[a.role]
+    tmux("set-option", "-p", "-t", pane, "@kal_color", color)
+    tmux("set-option", "-p", "-t", pane, "pane-border-style", f"fg={color}")
+    tmux("set-option", "-p", "-t", pane, "pane-active-border-style", f"fg={color},bold")
+    tmux("set-option", "-w", "-t", pane, "pane-border-format",
+         "#{?@kal_color,#[fg=#{@kal_color}#,bold],} #{pane_title} #[default]")
     tmux("set-option", "-w", "-t", pane, "pane-border-status", "top")
     # The Orchestrator's pane (the window's first) on the left, the Workers stacked on the right.
     tmux("set-option", "-w", "-t", pane, "main-pane-width", "50%")
