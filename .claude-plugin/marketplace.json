@@ -1,0 +1,15 @@
+{
+  "name": "kal",
+  "owner": {
+    "name": "Donovan Griggs"
+  },
+  "description": "The kal development plugin.",
+  "plugins": [
+    {
+      "name": "kal",
+      "source": "./",
+      "description": "Plan features interactively, then build them AFK with role agents in tmux panes.",
+      "category": "development"
+    }
+  ]
+}
