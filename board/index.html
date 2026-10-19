@@ -41,6 +41,23 @@ button { font: inherit; color: inherit; }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
 .mono { font-family: var(--mono); font-size: 12px; }
 .empty-note { color: var(--faint); font-size: 12px; padding: 10px 0; }
+.blgroup { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
+.blgroup > header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.blgroup > header h3 { margin: 0; font-size: 14.5px; }
+.blgroup .next { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.blgroup .next code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; font-family: var(--mono); font-size: 11.5px; }
+.blgroup .next button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; color: var(--muted); }
+.blrow { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 4px 12px; padding: 9px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.blrow:first-of-type { border-top: 0; }
+.blrow .nn { font-family: var(--mono); color: var(--faint); font-size: 11.5px; }
+.blrow .t { font-weight: 600; }
+.blrow .sub { grid-column: 2 / 4; color: var(--faint); font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.blrow .tags { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.st-ready-for-agent { background: var(--live-soft); color: var(--live); border-color: transparent; }
+.st-backlog { background: var(--panel-2); }
+.st-ready-for-human, .st-needs-info, .st-needs-triage { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.st-open, .st-claimed { background: var(--park-soft); color: var(--park); border-color: transparent; }
+.linkbtn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
 
 /* sidebar: runs (home) */
 .side { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
@@ -218,6 +235,7 @@ ul.plain li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 1
 <div class="app">
   <aside class="side">
     <div class="brand"><div class="logo">k</div><div><b id="repo">kal</b><small>kal board</small></div></div>
+    <div id="blnav" style="flex:none;margin-bottom:6px"></div>
     <h6>Runs</h6>
     <div class="runs" id="runs"></div>
     <div class="livei" id="livei"><span class="ldot"></span><span>connecting…</span></div>
@@ -290,9 +308,10 @@ async function poll() {
 }
 
 /* ---------- routing: #run=<feature>&tab=<lanes|graph|timeline>&t=<NN> ---------- */
-const hash = () => { const h = new URLSearchParams(location.hash.slice(1)); return { run: h.get("run"), tab: h.get("tab") || "lanes", t: h.get("t") }; };
+const hash = () => { const h = new URLSearchParams(location.hash.slice(1)); return { view: h.get("view"), run: h.get("run"), tab: h.get("tab") || "lanes", t: h.get("t") }; };
 function go(patch) {
   const h = { ...hash(), ...patch }, q = new URLSearchParams();
+  if (h.view) q.set("view", h.view);
   if (h.run) q.set("run", h.run); if (h.tab && h.tab !== "lanes") q.set("tab", h.tab); if (h.t) q.set("t", h.t);
   location.hash = q.toString();
 }
@@ -514,11 +533,59 @@ function drawDrawer(force) {
   box.scrollTop = top;
 }
 
+/* ---------- the Backlog: everything outstanding in the tracker ---------- */
+const BL = () => S.backlog || { groups: [], count: 0, tracker: "?" };
+function renderBacklogNav(on) {
+  const b = BL(), building = b.groups.flatMap((g) => g.items).filter((i) => i.run).length;
+  $("#blnav").innerHTML = `<button class="run ${on ? "on" : ""}" data-view="backlog">
+    <div class="top"><span class="name">Backlog</span><span class="pill" style="background:${b.count ? "var(--accent-soft)" : "var(--panel-2)"};color:${b.count ? "var(--accent)" : "var(--muted)"}">${b.count}</span></div>
+    <div class="meta">${b.count ? `${b.count} outstanding${building ? ` · ${building} being built` : ""}` : "nothing outstanding"}</div></button>`;
+}
+function renderBacklog() {
+  const b = BL(), items = b.groups.flatMap((g) => g.items);
+  const n = (f) => items.filter(f).length;
+  const tracker = { local: "local markdown (.scratch/)", github: "GitHub issues", gitlab: "GitLab issues", other: "another tracker" }[b.tracker] || b.tracker;
+  $("#head").innerHTML = `<div class="title"><h1>Backlog</h1><span class="muted" style="font-size:12px">from ${esc(tracker)}</span></div>
+    <div class="stats">
+      <div class="stat"><label>Outstanding</label><b>${b.count}</b></div>
+      <div class="stat"><label>Being built</label><b>${n((i) => i.run)}</b></div>
+      <div class="stat"><label>Ready for an agent</label><b>${n((i) => !i.run && i.status === "ready-for-agent")}</b></div>
+      <div class="stat"><label>Backlog</label><b>${n((i) => !i.run && i.status === "backlog")}</b></div>
+      <div class="stat"><label>Needs a human</label><b style="color:${n((i) => i.status === "ready-for-human") ? "var(--warn)" : "inherit"}">${n((i) => i.status === "ready-for-human")}</b></div>
+      <div class="stat"><label>Decisions to make</label><b>${n((i) => ["open", "claimed"].includes(i.status))}</b></div>
+    </div>`;
+  const row = (i) => `<div class="blrow">
+      <span class="nn">${esc(i.nn || "")}</span><span class="t">${esc(i.title)}</span>
+      <span class="tags">${i.size ? `<span class="chip">${esc(i.size)}</span>` : ""}<span class="chip st-${esc(i.status)}">${esc(i.status)}</span></span>
+      <span class="sub">
+        ${i.run ? `<button class="linkbtn" data-run="${esc(i.run)}">building in ${esc(i.run)} · ${esc(i.run_status || "")}</button>` : ""}
+        ${i.blocked_by && !/^none/i.test(i.blocked_by) ? `<span>blocked by ${esc(i.blocked_by)}</span>` : ""}
+        ${i.filed_by ? `<span>filed by <button class="linkbtn" data-run="${esc(i.filed_by)}">${esc(i.filed_by)}</button></span>` : ""}
+        ${i.ref ? (/^https?:\/\//.test(i.ref) ? `<a href="${esc(i.ref)}" target="_blank" rel="noopener">${esc(i.ref)}</a>` : `<span class="mono">${esc(i.ref)}</span>`) : ""}
+      </span></div>`;
+  $("#view").innerHTML = (b.error ? `<p class="empty-note">${esc(b.error)}</p>` : "") + (b.groups.length ? b.groups.map((g) => `<section class="blgroup">
+      <header><h3>${esc(g.title)}</h3><span class="chip">${esc(g.kind)}</span>${g.status ? `<span class="chip">${esc(g.status)}</span>` : ""}
+        ${g.path ? `<span class="mono faint" style="font-size:11.5px">${esc(g.path)}</span>` : ""}
+        ${g.next ? `<span class="next">${g.next.startsWith("/") ? `<code>${esc(g.next)}</code><button data-copy="${esc(g.next.split("  ")[0])}">copy</button>` : `<span class="muted">${esc(g.next)}</span>`}</span>` : ""}</header>
+      ${g.items.map(row).join("")}</section>`).join("")
+    : `<div class="hero"><h2>Nothing outstanding</h2><div class="muted">Every ticket in the tracker is done. New ones appear here as soon as they're filed.</div></div>`);
+  $("#rail").innerHTML = `<section><h3>How to use this</h3><div class="muted" style="font-size:12.5px;line-height:1.5">
+    Every ticket in the tracker that isn't done, whichever Run filed it.<br><br>
+    <b>Ready for an agent</b> or <b>backlog</b>: run the spec's command (copy it from its group) in a Claude session in this repo, inside tmux. A finished spec offers its backlog as a follow-up Run.<br><br>
+    <b>Needs a human</b>: kal won't build it; it's yours.<br><br>
+    <b>Decisions to make</b>: open tickets on a pathfinder map.</div></section>`;
+}
+
 /* ---------- draw ---------- */
 function fade() { const ls = $("#ls"); if (ls) ls.classList.toggle("at-end", ls.scrollLeft + ls.clientWidth >= ls.scrollWidth - 4); }
 function draw() {
   if (!S) return;
   NOW = Date.now(); lastDraw = NOW;
+  if (hash().view === "backlog") {
+    renderBacklogNav(true); renderRuns(null); renderBacklog();
+    return drawDrawer(false);
+  }
+  renderBacklogNav(false);
   const run = runOf();
   renderRuns(run);
   if (!run) {
@@ -538,14 +605,16 @@ function draw() {
 
 /* one delegated click handler, so redraws never need rewiring */
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-close], [data-file], [data-sev], [data-src], [data-tab], [data-run], [data-nn]");
+  const el = e.target.closest("[data-close], [data-file], [data-sev], [data-src], [data-tab], [data-run], [data-nn], [data-view], [data-copy]");
   if (!el) return;
+  if (el.dataset.copy) { navigator.clipboard?.writeText(el.dataset.copy); el.textContent = "copied"; return; }
+  if (el.dataset.view) return go({ view: el.dataset.view, run: null, t: null });
   if ("close" in el.dataset) return go({ t: null });
   if (el.dataset.file) return toggleFile(el.dataset.file);
   if (el.dataset.sev) { ui.sev = ui.sev === el.dataset.sev ? null : el.dataset.sev; return renderRail(runOf()); }
   if (el.dataset.src) { const lb = $("#lb"); lb.querySelector("img").src = el.dataset.src; return lb.classList.add("on"); }
   if (el.dataset.tab) return go({ tab: el.dataset.tab });
-  if (el.dataset.run) { ui.sev = null; return go({ run: el.dataset.run, t: null }); }
+  if (el.dataset.run) { ui.sev = null; return go({ view: null, run: el.dataset.run, t: null }); }
   if (el.dataset.nn) return go({ run: runOf()?.feature, t: el.dataset.nn });
 });
 $("#lb").addEventListener("click", () => $("#lb").classList.remove("on"));

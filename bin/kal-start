@@ -80,7 +80,8 @@ for other in sorted((repo / ".kal" / "runs").iterdir()):
 
 run_md = run_dir / "run.md"
 LIVE = ("in-dev", "in-review", "fixing", "ready-to-merge", "merging", "parked", "needs-you")
-if run_md.exists():
+preflight = run_md.exists() and field("Phase", run_md.read_text()) == "preflight"  # an earlier start didn't finish
+if run_md.exists() and not preflight:
     text = run_md.read_text()
     if field("Finished", text):
         stop(0, f"finished at {field('Finished', text)}: this Run is done; to build the spec's remaining or "
@@ -100,6 +101,20 @@ changed = dirty(repo)
 if changed:
     stop(1, f"the main checkout has uncommitted changes ({', '.join(changed[:5])}): commit or stash them first")
 
+# The Board shows a Run from the moment it starts: run.md goes down now, as Phase: preflight, and turns into
+# Phase: tickets once the checks below pass. A red base leaves it in preflight, and the next start retries it.
+integration = f"kal/{run_dir.name}"
+wt = repo.parent / f"{repo.name}-kal" / f"{run_dir.name}-integration"
+header = (f"Mode: build-spec\nBase branch: {integration}\nTarget branch: {base}\nIntegration worktree: {wt}\n"
+          if a.mode == "build-spec" else f"Mode: {a.mode}\nBase branch: {base}\n")
+if not run_md.exists():
+    run_md.write_text(f"# Run: {run_dir.name}\n\n{header}Phase: preflight\nStarted: {time.strftime('%Y-%m-%d %H:%M')}\n"
+                      f"Heartbeat: {int(time.time())}\n\n## Notes\n\n## Log\n")
+    reused = False
+else:
+    reused = not preflight  # an idle single-ticket Run folder, starting a new build
+    subprocess.run([str(HERE / "kal-set"), str(run_md), f"Heartbeat={int(time.time())}"], check=True)
+
 # Warm the QA browser's MCP server (npx fetches it once), so QA panes connect fast instead of timing out.
 # ponytail: best-effort; QA reports `Browser: not run` and is retried if it still fails.
 try:
@@ -114,22 +129,21 @@ except (OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired)
 v = subprocess.run([str(HERE / "kal-verify"), "--retry-once", str(repo), str(run_dir / "reports" / "base")], text=True,
                    stdout=subprocess.PIPE)
 if v.returncode:
-    stop(1, f"Verify is red on {base} ({v.stdout.split()[-1] if v.stdout.split() else '?'}): fix it first")
+    log = v.stdout.split()[-1] if v.stdout.split() else "?"
+    if not reused:
+        subprocess.run([str(HERE / "kal-set"), str(run_md), "--log", f"base Verify red on {base}: {log}"])
+    stop(1, f"Verify is red on {base} ({log}): fix it first")
 
-if run_md.exists() and a.mode == "build":  # a reused single-ticket Run folder: keep its Log, new base
+if reused:  # a reused single-ticket Run folder: keep its Log, new base
     subprocess.run([str(HERE / "kal-set"), str(run_md), f"Base branch={base}", f"Heartbeat={int(time.time())}",
                     "--log", f"new build on {base}"], check=True)
     stop(0, f"first start: base branch {base} (Run folder reused)")
-header = f"Mode: {a.mode}\nBase branch: {base}\n"
-if a.mode == "build-spec":
-    integration = f"kal/{run_dir.name}"
-    wt = repo.parent / f"{repo.name}-kal" / f"{run_dir.name}-integration"
+if a.mode == "build-spec" and not wt.is_dir():
     wt.parent.mkdir(parents=True, exist_ok=True)
     r = run("git", "worktree", "add", "-q", "-b", integration, str(wt), base, cwd=repo)
     if r.returncode:
         stop(1, f"could not cut {integration} from {base} into {wt}: {r.stderr.strip()} (a leftover from an earlier "
                 f"Run? remove it with `git worktree remove {wt}` and `git branch -D {integration}`)")
-    header = f"Mode: build-spec\nBase branch: {integration}\nTarget branch: {base}\nIntegration worktree: {wt}\n"
-run_md.write_text(f"# Run: {run_dir.name}\n\n{header}Phase: tickets\nStarted: {time.strftime('%Y-%m-%d %H:%M')}\n"
-                  f"Heartbeat: {int(time.time())}\n\n## Notes\n\n## Log\n")
+subprocess.run([str(HERE / "kal-set"), str(run_md), "Phase=tickets", f"Heartbeat={int(time.time())}",
+                "--log", f"started on {base}"], check=True)
 print(f"first start: base branch {base}" + (f", integration branch kal/{run_dir.name}" if a.mode == "build-spec" else ""))

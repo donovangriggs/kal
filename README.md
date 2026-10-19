@@ -135,7 +135,8 @@ The Board is kal's live dashboard: one per repo, read-only, at `http://127.0.0.1
 
 | Area | Content |
 |---|---|
-| Sidebar | Every run in the repo: active, paused, needs you, finished, with progress, and what each filed or decided |
+| **Backlog** (top of the sidebar) | **Everything outstanding in your tracker**, whichever run filed it: grouped by spec (or pathfinder map), each ticket's status (ready for an agent, backlog, needs a human, a decision to make), size and blockers, the run building it right now or the run that filed it, and per spec **what to run next** (with a copy button). Local markdown is read from `.scratch/`; GitHub and GitLab through `gh` / `glab`. Nothing outstanding gets missed. |
+| Sidebar | Every run in the repo: active, paused, needs you, finished, with progress, and what each filed or decided. A run appears the moment it starts. |
 | Header | Merged / total, live workers and the 3 developer slots, needs-you count, elapsed, base → target, phase, the orchestrator's context size |
 | Lanes | Needs you · Waiting on blockers · Ready · In dev · Checks · Fixing · Merging · Parked · Merged. Each card has a pipeline stepper (dev → checks → fix → merge) with verdicts and rounds, plus badges for blockers, parked waits and discovered tickets |
 | Dependencies | The ticket graph: what's blocked on what, and what can start now |

@@ -187,6 +187,117 @@ def run_state(run_dir, repo):
             "feed": [{"time": a, "ticket": b or None, "text": c} for a, b, c in feed[:200]]}
 
 
+# ---------- the Backlog: everything outstanding in the tracker, whichever Run filed it ----------
+DONE = {"done", "resolved", "merged", "closed", "wontfix", "dropped"}
+KAL_LABELS = ("ready-for-agent", "backlog", "ready-for-human", "needs-info", "needs-triage")
+_cache = {}  # (tracker, repo) -> (time, items): GitHub/GitLab are asked at most once a minute
+
+
+def header(text, key):
+    """A ticket header value, plain (`Status: x`) or bold (`**Status:** x`); first match wins."""
+    m = re.search(rf"^\**{key}:?\**:?[ \t]*\**[ \t]*(.+?)\**[ \t]*$", text, re.M | re.I)
+    return m[1].strip() if m else None
+
+
+def remote_issues(kind, repo):
+    """Open issues carrying a kal label, from GitHub (gh) or GitLab (glab): [{nn, title, status, ref}]."""
+    hit = _cache.get((kind, repo))
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    if kind == "github":
+        raw = sh("gh", "issue", "list", "--state", "open", "--limit", "300", "--json", "number,title,labels,url", cwd=repo)
+        rows = [(i["number"], i["title"], [l["name"] for l in i.get("labels", [])], i["url"]) for i in json.loads(raw or "[]")]
+    else:
+        raw = sh("glab", "issue", "list", "-O", "json", "--per-page", "100", cwd=repo)
+        rows = [(i["iid"], i["title"], i.get("labels", []), i.get("web_url")) for i in json.loads(raw or "[]")]
+    items = []
+    for nn, title, labels, url in rows:
+        status = next((l for l in KAL_LABELS if l in labels), None) or next((l for l in labels if l.startswith("pathfinder:")), None)
+        if status:
+            items.append({"nn": str(nn), "title": title, "status": status, "ref": url})
+    _cache[(kind, repo)] = (time.time(), items)
+    return items
+
+
+def backlog(repo, runs):
+    """Every outstanding ticket in the repo's tracker, grouped by spec (or map), each linked to the Run building it
+    (if any) and the Run that filed it, with what to run next. Local markdown is read from .scratch/; GitHub and
+    GitLab through gh / glab; another tracker shows only what Runs filed."""
+    doc = repo / "docs" / "agents" / "issue-tracker.md"
+    first = doc.read_text().splitlines()[0].lower() if doc.is_file() else ""
+    kind = "local" if "local" in first else "github" if "github" in first else "gitlab" if "gitlab" in first else "other"
+    building = {}  # a ticket's source (path or number) -> (run, status), from every unfinished Run's mirrors
+    for r in runs:
+        for t in r["tickets"]:
+            if t["source"] and r["state"] != "finished":
+                building[t["source"]] = (r["feature"], t["status"])
+                building[t["source"].lstrip("#").split("/")[-1]] = (r["feature"], t["status"])
+    filed_by = {f["ref"]: r["feature"] for r in runs for f in r.get("filed", []) if f.get("ref")}
+    groups, error = [], None
+
+    def item(nn, title, status, ref, size=None, blocked=None):
+        key = ref or nn
+        where = building.get(key) or building.get(str(nn))
+        return {"nn": nn, "title": title, "status": status, "ref": ref, "size": size, "blocked_by": blocked,
+                "run": where[0] if where else None, "run_status": where[1] if where else None,
+                "filed_by": filed_by.get(ref)}
+
+    if kind == "local":
+        scratch = repo / ".scratch"
+        for d in sorted(scratch.iterdir()) if scratch.is_dir() else []:
+            spec, mp = d / "spec.md", d / "map.md"
+            if not (spec.is_file() or mp.is_file()):
+                continue
+            items = []
+            for f in sorted((d / "issues").glob("*.md")):
+                text = f.read_text()
+                status = (header(text, "Status") or ("open" if mp.is_file() and not spec.is_file() else "?")).lower()
+                if status in DONE:
+                    continue
+                title = re.search(r"^#\s+(?:\d+:\s*)?(.*)$", text, re.M)
+                items.append(item(f.name.split("-")[0], title[1].strip() if title else f.stem, status,
+                                  str(f.relative_to(repo)), header(text, "Size"), header(text, "Blocked by")))
+            if not items:
+                continue
+            src = spec if spec.is_file() else mp
+            title = re.search(r"^#\s+(.*)$", src.read_text(), re.M)
+            groups.append({"name": d.name, "kind": "spec" if spec.is_file() else "map",
+                           "title": title[1].strip() if title else d.name, "path": str(src.relative_to(repo)),
+                           "status": (header(src.read_text(), "Status") or "").lower() or None, "items": items})
+    elif kind in ("github", "gitlab"):
+        try:
+            items = [item(i["nn"], i["title"], i["status"], i["ref"]) for i in remote_issues(kind, repo)]
+        except (ValueError, KeyError) as e:
+            items, error = [], f"couldn't read the {kind} issues: {e}"
+        for label in KAL_LABELS + ("pathfinder",):
+            mine = [i for i in items if i["status"] == label or (label == "pathfinder" and i["status"].startswith("pathfinder:"))]
+            if mine:
+                groups.append({"name": label, "kind": "map" if label == "pathfinder" else "label", "title": label,
+                               "path": None, "status": None, "items": mine})
+    else:
+        mine = [item(f["nn"], f["title"], f["status"] or "filed", f["ref"]) for r in runs for f in r.get("filed", [])]
+        if mine:
+            groups.append({"name": "filed", "kind": "label", "title": "Filed by Runs", "path": None, "status": None,
+                           "items": mine})
+        error = "this tracker isn't read directly: only tickets kal Runs filed are shown"
+
+    for g in groups:  # what to run next, per group
+        active = sorted({i["run"] for i in g["items"] if i["run"]})
+        st = {i["status"] for i in g["items"]}
+        if active:
+            g["next"] = f"building in {', '.join(active)}"
+        elif g["kind"] == "map":
+            g["next"] = f"/kal:pathfinder {g['path'] or ''}".strip()
+        elif g["kind"] == "spec" and st & {"ready-for-agent", "backlog", "ready", "?"}:
+            g["next"] = f"/kal:build-spec {g['path']}" + ("" if "ready-for-agent" in st else "  (offers the backlog)")
+        elif st <= {"ready-for-human"}:
+            g["next"] = "needs a human"
+        else:
+            g["next"] = None
+    count = sum(len(g["items"]) for g in groups)
+    return {"tracker": kind, "groups": groups, "count": count, "error": error}
+
+
 def state(repo):
     repo = Path(repo).resolve()
     runs_dir = repo / ".kal" / "runs"
@@ -197,7 +308,8 @@ def state(repo):
         version = json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
     except (OSError, ValueError, KeyError):
         version = None
-    return {"repo": str(repo), "name": repo.name, "kal": version, "generated": stamp(time.time()), "runs": runs}
+    return {"repo": str(repo), "name": repo.name, "kal": version, "generated": stamp(time.time()), "runs": runs,
+            "backlog": backlog(repo, runs)}
 
 
 if __name__ == "__main__":
