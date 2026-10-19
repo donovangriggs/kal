@@ -57,8 +57,11 @@ def report_field(key, text):
 
 
 def commands(checkout):
-    """The `## Commands` block of <checkout>/CLAUDE.md as {key: command}; `none`, `TODO` or missing -> None."""
-    md = Path(checkout) / "CLAUDE.md"
+    """The `## Commands` block as {key: command}; `none`, `TODO` or missing -> None. Always read from the MAIN
+    checkout's CLAUDE.md, whichever worktree is asked about, so a change to the repo's commands applies at once,
+    mid-Run (a worktree cut earlier still has the old block)."""
+    main = repo_of(checkout) if Path(checkout).is_dir() else None
+    md = (main or Path(checkout)) / "CLAUDE.md"
     text = md.read_text() if md.is_file() else ""
     out = {}
     for key in COMMAND_KEYS:

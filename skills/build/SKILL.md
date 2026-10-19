@@ -78,6 +78,7 @@ Then sort the results:
 
 - Append each report's **Non-blocking findings** to `.kal/runs/<feature>/refine.md`, under a `## <NN> round <K>` heading.
 - Collect each report's **Proposed tickets** (section 7).
+- **Browser not run:** if qa's note said `browser: yes` and its report says `Browser: not run`, the browser server failed. Run qa once more with the note `retry: the browser server failed last time` before acting on the results. If it still says not run, log `browser QA not run: <why>` on the ticket and act on its other results: list it in the final report so the user knows that check didn't happen.
 - **Every check PASS:** `kal-set <ticket> Status=ready-to-merge --log "checks PASS at <short sha>"`, then Merge.
 - **Any CHANGES:** go to Fix.
 

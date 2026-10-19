@@ -42,6 +42,8 @@ Example: building "Renew a loan", you notice overdue fines are never recalculate
 ## Proposed tickets
 - kind: prerequisite | follow-up | out-of-scope | spec-conflict
   title: ... / what: ... / why: ... / blocks: NN / blocked by: NN
+  recommended: (spec-conflict only) the resolution you'd pick, and the measurement that shows it works
+  options: (spec-conflict only) the other resolutions, one line each
 ## Assumptions
 <every decision you made instead of asking>
 Verdict: READY | STUCK
@@ -52,4 +54,4 @@ Leave out sections that would be empty, except Assumptions.
 
 **READY** only when everything is committed, the tree is clean, and the checks from step 6 pass at HEAD. Name the commands you ran in the report.
 
-**STUCK** when your tests won't go green, or the ticket contradicts the spec or the code. Commit what works first. Then say exactly what fails (the command and its output), what you tried, and what you suspect: this report becomes the bug-fixer's starting point. A ticket the spec makes impossible is also a `spec-conflict` proposal.
+**STUCK** when your tests won't go green, or the ticket contradicts the spec or the code. Commit what works first. Then say exactly what fails (the command and its output), what you tried, and what you suspect: this report becomes the bug-fixer's starting point. A ticket the spec makes impossible is also a `spec-conflict` proposal. Make it decidable in one go: before stopping, try the resolution you'd recommend (uncommitted, then revert it), measure **every** gate the ticket touches with it, and put the numbers in `recommended:`. A run whose human is away may apply your recommendation without asking, so make it the one you'd defend.

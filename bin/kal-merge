@@ -36,6 +36,22 @@ class Fail(Exception):
         self.code, self.msg = code, msg
 
 
+def flaky(t, out, who):
+    """A Verify that was red, then green on its retry: log it on the Ticket and propose it for later (proposals.md
+    `## Out of scope`, which the end of the spec offers to file), so the flaky test gets fixed, not forgotten."""
+    if "flaky" not in out:
+        return ""
+    logs = " ".join(w for w in out.split() if w.endswith(".log"))
+    subprocess.run([str(HERE / "kal-set"), str(t.path), "--log", f"flaky Verify at merge: red, then green on retry ({logs})"])
+    proposals = t.run_dir / "proposals.md"
+    if not proposals.exists():
+        proposals.write_text("# Proposals\n")
+    subprocess.run([str(HERE / "kal-set"), str(proposals), "--append", "Out of scope",
+                    f"- (from {who} merge) Flaky Verify: the first run failed and the retry passed; find and fix the "
+                    f"flaky test. Logs: {logs}"])
+    return "; flaky Verify passed on retry"
+
+
 def mark_merged(t, tip):
     subprocess.run([str(HERE / "kal-set"), str(t.path), "Status=merged", "Workers=", "--log",
                     f"merged into {t.base} at {tip}"])
@@ -107,14 +123,18 @@ def merge_one(t):
             run("git", "merge", "--abort", cwd=wt)
             return 4, f"{t.base} conflicts with {t.branch}; merge aborted, branch unchanged"
     verified = git("rev-parse", "HEAD", cwd=wt)
-    v = subprocess.run([str(HERE / "kal-verify"), wt, str(t.round_dir())], text=True, stdout=subprocess.PIPE)
+    # --retry-once: a red merge is run once more before it counts (most reds at merge time were flakes or
+    # infrastructure, not the Ticket's code); green on retry is recorded as a flaky test.
+    v = subprocess.run([str(HERE / "kal-verify"), "--retry-once", wt, str(t.round_dir())], text=True,
+                       stdout=subprocess.PIPE)
     if v.returncode:
-        return 5, f"RED: Verify failed on {verified[:7]}, not merged: {v.stdout.strip()}"
+        return 5, f"RED: Verify failed on {verified[:7]} (also on a retry), not merged: {v.stdout.strip()}"
+    note = flaky(t, v.stdout, t.nn)
     # Merge the verified sha, not the branch name, so only the tree Verify saw can land.
     if run("git", "merge", "--no-ff", verified, "-m", f"Merge {t.nn}: {t.title}", cwd=base_wt).returncode:
         run("git", "merge", "--abort", cwd=base_wt)
         return 6, f"merging {t.branch} into {t.base} failed; aborted"
-    return 0, clean_up(t, base_wt, wt, git("rev-parse", "--short", "HEAD", cwd=base_wt))
+    return 0, clean_up(t, base_wt, wt, git("rev-parse", "--short", "HEAD", cwd=base_wt)) + note
 
 
 def merge_batch(ts):
@@ -166,7 +186,9 @@ def merge_batch(ts):
             fallback = "fewer than 2 Tickets merge cleanly together"
     if not fallback:
         logs = first.run_dir / "reports" / "batch" / time.strftime("%Y%m%d-%H%M%S")
-        v = subprocess.run([str(HERE / "kal-verify"), str(tmp_wt), str(logs)], text=True, stdout=subprocess.PIPE)
+        v = subprocess.run([str(HERE / "kal-verify"), "--retry-once", str(tmp_wt), str(logs)], text=True,
+                           stdout=subprocess.PIPE)
+        note = flaky(members[0][0], v.stdout, ", ".join(t.nn for t, _, _ in members)) if not v.returncode else ""
         for t, _, _ in members:  # each Ticket's round folder keeps the Verify that let it land
             for log in logs.glob("verify-*.log"):
                 shutil.copy(log, t.round_dir() / log.name)
@@ -177,7 +199,7 @@ def merge_batch(ts):
             fallback = f"{base} moved during the batch"
         else:
             for t, wt, merge_sha in members:
-                results[t.nn] = (0, clean_up(t, base_wt, wt, merge_sha) + f" (batch of {len(members)}, one Verify)")
+                results[t.nn] = (0, clean_up(t, base_wt, wt, merge_sha) + f" (batch of {len(members)}, one Verify)" + note)
     drop_tmp()
     if fallback:  # one at a time: only the guilty Ticket goes red
         later = [t for t, *_ in ready]

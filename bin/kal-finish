@@ -56,10 +56,13 @@ if a.merge_into:
     target_wt = trees[a.merge_into]
     if dirty(target_wt):
         stop(2, f"{target_wt} ({a.merge_into}) is not clean: {', '.join(dirty(target_wt)[:5])}")
-    v = subprocess.run([str(HERE / "kal-verify"), int_wt, str(run_dir / "reports" / "00" / "finish")], text=True,
-                       stdout=subprocess.PIPE)
+    v = subprocess.run([str(HERE / "kal-verify"), "--retry-once", int_wt, str(run_dir / "reports" / "00" / "finish")],
+                       text=True, stdout=subprocess.PIPE)
     if v.returncode:
-        stop(5, f"RED: Verify failed on {head[:7]}, not merged: {v.stdout.strip()}")
+        stop(5, f"RED: Verify failed on {head[:7]} (also on a retry), not merged: {v.stdout.strip()}")
+    if "flaky" in v.stdout:
+        subprocess.run([str(HERE / "kal-set"), str(run_dir / "run.md"), "--log",
+                        f"flaky Verify at the hand-off: red, then green on retry ({v.stdout.strip()})"])
     if run("git", "merge", "--no-ff", head, "-m", f"Merge {run_dir.name}", cwd=target_wt).returncode:
         run("git", "merge", "--abort", cwd=target_wt)
         stop(4, f"merging {integration} into {a.merge_into} conflicts; aborted")

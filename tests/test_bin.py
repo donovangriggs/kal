@@ -583,3 +583,54 @@ class Append(Repo):
         text = run_md.read_text()
         self.assertIn("## Filed\n\n- 14: Guard empty slugs", text)
         self.assertLess(text.index("- 14:"), text.index("- 15:"))
+
+
+class Logs(Repo):
+    verify = "false"
+
+    def test_a_second_run_of_the_same_commit_gets_its_own_log(self):
+        logs = self.tmp / "logs"
+        kal("kal-verify", str(self.repo), str(logs), cwd=self.repo)
+        kal("kal-verify", str(self.repo), str(logs), cwd=self.repo)
+        self.assertEqual(sorted(p.name.count("-") for p in logs.glob("verify-*.log")), [1, 2])
+
+
+class Flaky(Repo):
+    verify = "f=../.kal-flaky; if [ -f $f ]; then exit 0; fi; touch $f; exit 1"
+
+    def test_retry_once_reports_a_flaky_pass_and_keeps_both_logs(self):
+        logs = self.tmp / "logs"
+        r = kal("kal-verify", "--retry-once", str(self.repo), str(logs), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("flaky", r.stdout)
+        self.assertEqual(len(list(logs.glob("verify-*.log"))), 2)
+
+    def test_a_flaky_merge_lands_and_is_proposed_for_later(self):
+        t, wt = self.started()
+        head = self.commit(wt, "renew.txt", "ok\n")
+        self.report(t, "review.md", "PASS", head)
+        (self.tmp / ".kal-flaky").unlink(missing_ok=True)
+        r = kal("kal-merge", str(t), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("flaky", r.stdout)
+        self.assertIn("Flaky Verify", (self.run_dir / "proposals.md").read_text())
+
+
+class CommandsFromMain(Repo):
+    def test_a_worktree_uses_the_main_checkouts_current_commands(self):
+        t, wt = self.started()
+        self.commit(wt, "renew.txt", "ok\n")  # a new commit, so no earlier pass can be reused
+        claude = self.repo / "CLAUDE.md"
+        claude.write_text(claude.read_text().replace("- Verify: `true`", "- Verify: `false`"))
+        sh("git", "commit", "-qam", "verify changed mid-run", cwd=self.repo)
+        r = kal("kal-verify", str(wt), str(self.tmp / "logs"), cwd=self.repo)
+        self.assertNotEqual(r.returncode, 0, "the worktree's older CLAUDE.md still says true; main's says false")
+
+
+class Pause(Repo):
+    def test_pause_sets_the_flag_and_returns_when_nothing_runs(self):
+        kal("kal-start", str(self.run_dir), cwd=self.repo)
+        r = kal("kal-pause", str(self.run_dir), cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue((self.run_dir / "pause").exists())
+        self.assertIn("has stopped", r.stdout)

@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""kal-pause [<run dir>]: pause a Run safely, and wait until it has stopped.
+
+Sets the Run's pause flag (the orchestrator starts no new steps), then waits until every kal-worker, kal-merge and
+kal-finish of that Run has exited: the steps in flight finish and write their reports, so nothing is lost. Then
+it's safe to close the session, update kal, or reboot. Prints what it's waiting on every 15 seconds. Without a
+run dir it pauses the repo's one active Run. Resume by running the same /kal:build or /kal:build-spec again.
+"""
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from _kal import field, git, stop
+
+if len(sys.argv) > 1:
+    run_dir = Path(sys.argv[1]).resolve()
+else:
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=Path.cwd())
+    runs = Path(common).parent / ".kal" / "runs" if common else None
+    live = [d for d in sorted(runs.iterdir()) if (d / "run.md").is_file()
+            and not field("Finished", (d / "run.md").read_text())] if runs and runs.is_dir() else []
+    if len(live) != 1:
+        stop(2, "usage: kal-pause <run dir>  (" + (f"{len(live)} unfinished Runs: " + ", ".join(d.name for d in live)
+                                                   if live else "no unfinished Run here") + ")")
+    run_dir = live[0]
+if not (run_dir / "run.md").is_file():
+    stop(2, f"no Run at {run_dir}")
+
+(run_dir / "pause").touch()
+print(f"paused {run_dir.name}: no new steps start; waiting for the ones in flight to finish", flush=True)
+# The Run's name followed by "/", a space or the end: zr-seo's processes, never zr-seo-2's.
+pattern = f"kal-(worker|merge|finish) .*{run_dir.name}([/ ]|$)"
+last = 0
+while True:
+    out = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True).stdout.strip().splitlines()
+    busy = []
+    for line in out:
+        words = line.split()
+        tool = next((Path(w).name for w in words if Path(w).name.startswith("kal-")), None)
+        if tool and tool != "kal-pause":
+            busy.append(f"{tool} {Path(words[-1]).name}")
+    if not busy:
+        break
+    if time.time() - last >= 15:
+        print(f"waiting on {len(busy)}: " + "; ".join(sorted(busy)), flush=True)
+        last = time.time()
+    time.sleep(2)
+print(f"{run_dir.name} has stopped: safe to close, update or reboot. Run the same command again to resume.")

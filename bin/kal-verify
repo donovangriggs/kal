@@ -1,52 +1,65 @@
 #!/bin/sh
-# kal-verify [--quick] <worktree> <log-dir>
-# Runs the repo's Verify command (CLAUDE.md "- Verify: `cmd`") in <worktree> and writes
-# <log-dir>/verify-<short sha>.log. Exits with Verify's exit code (2: usage or no such command).
-# --quick runs the Commands block's optional `Quick check` instead (lint, types, unit, build: what's fast and
-# needs no shared services), logged as quick-<short sha>.log, with its own reuse store and no global slot.
+# kal-verify [--quick] [--retry-once] <worktree> <log-dir>
+# Runs the repo's Verify command in <worktree> and logs it in <log-dir>. Exits with Verify's exit code
+# (2: usage, or no such command).
+# - The command comes from the MAIN checkout's CLAUDE.md `## Commands` block (not the worktree's), so a change to
+#   the repo's commands applies at once, mid-Run.
+# - --quick runs the optional `Quick check` instead (lint, types, unit, build: fast, no shared services), logged
+#   as quick-*, with its own reuse store and no global slot.
+# - --retry-once: a red run is run once more before it counts. Green on the retry prints `PASS (flaky: …)` with
+#   both logs, so the caller can record the flaky test. kal-merge and kal-finish use it; Workers don't.
+# - Logs are never overwritten: <name>-<sha>.log, then -2, -3… for later runs of the same commit, and
+#   <name>-<sha>-reused.log when a pass is reused.
 # Reuse: a pass is recorded per commit in the git common dir, so any worktree or Run can reuse it.
-key=Verify name=verify store=kal-verify-passed
-if [ "${1:-}" = "--quick" ]; then key="Quick check" name=quick store=kal-quick-passed; shift; fi
-[ $# -eq 2 ] || { echo "usage: kal-verify [--quick] <worktree> <log-dir>" >&2; exit 2; }
+key=Verify name=verify store=kal-verify-passed retry=0
+while [ $# -gt 2 ]; do
+  case "$1" in
+    --quick) key="Quick check" name=quick store=kal-quick-passed ;;
+    --retry-once) retry=1 ;;
+    *) break ;;
+  esac
+  shift
+done
+[ $# -eq 2 ] || { echo "usage: kal-verify [--quick] [--retry-once] <worktree> <log-dir>" >&2; exit 2; }
 wt=$(cd "$1" && pwd) || exit 2
-cmd=$(sed -n "s/^- $key[^\`]*\`\([^\`]*\)\`.*/\\1/p" "$wt/CLAUDE.md" 2>/dev/null | head -n 1)
+common=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir) || exit 2
+main=$(dirname "$common")
+cmd=$(sed -n "s/^- $key[^\`]*\`\([^\`]*\)\`.*/\\1/p" "$main/CLAUDE.md" 2>/dev/null | head -n 1)
 case "$cmd" in none|None|NONE|todo|TODO) cmd= ;; esac
-[ -n "$cmd" ] || { echo "kal-verify: no '- $key: \`cmd\`' line in $wt/CLAUDE.md" >&2; exit 2; }
+[ -n "$cmd" ] || { echo "kal-verify: no '- $key: \`cmd\`' line in $main/CLAUDE.md" >&2; exit 2; }
 head=$(git -C "$wt" rev-parse HEAD) || exit 2
 short=$(git -C "$wt" rev-parse --short HEAD)
 mkdir -p "$2" || exit 2
-log=$(cd "$2" && pwd)/$name-$short.log
+dir=$(cd "$2" && pwd)
 dirty=$(git -C "$wt" status --porcelain | wc -l | tr -d ' ')
+passed="$common/$store"
 
-# Every pass from a clean tree, one commit per line, shared by every worktree and Run (see the reuse below).
-passed=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/$store
-
-# Reuse a passing log for this exact commit, verified from a clean tree. Recorded in the store if it isn't yet
-# (logged before the store existed), so later commits with the same tree can reuse it too.
-if [ "$dirty" = 0 ] && [ "$(head -n 2 "$log" 2>/dev/null)" = "commit $head
-dirty files: 0" ] && [ "$(tail -n 1 "$log")" = "kal-verify: exit 0" ]; then
-  grep -qx "$head" "$passed" 2>/dev/null || echo "$head" >> "$passed"
-  echo "PASS (reused) $log"; exit 0
-fi
-
-# Reuse a pass of another commit whose tree differs from HEAD only under .scratch/ or .kal/ (tracker and run files): a --no-ff merge
-# of a verified branch, a Ticket-only commit on main. Passes are recorded in the git common dir, so this works
-# across worktrees, log dirs and Runs. The reused log gets HEAD's own log, so the check above finds it next time.
+# Reuse: this commit passed from a clean tree before, or a passed commit's tree differs from HEAD only under
+# .scratch/ or .kal/ (tracker and run files: a --no-ff merge of a verified branch, a Ticket-only commit).
 if [ "$dirty" = 0 ] && [ -f "$passed" ]; then
   # ponytail: .scratch/ is the local tracker's folder; make it a setting if a repo keeps Tickets elsewhere.
   for sha in $(tail -n 50 "$passed"); do
-    if git -C "$wt" cat-file -e "$sha^{commit}" 2>/dev/null &&
-      git -C "$wt" diff --quiet "$sha" "$head" -- . ':(exclude).scratch' ':(exclude).kal'; then
-      { echo "commit $head"; echo "dirty files: 0"; echo "reused: $key passed at $sha, and only .scratch/ or .kal/ changed since"
-        echo "kal-verify: exit 0"; } > "$log"
+    if [ "$sha" = "$head" ] || { git -C "$wt" cat-file -e "$sha^{commit}" 2>/dev/null &&
+      git -C "$wt" diff --quiet "$sha" "$head" -- . ':(exclude).scratch' ':(exclude).kal'; }; then
+      log="$dir/$name-$short-reused.log"
+      { echo "commit $head"; echo "dirty files: 0"; echo "reused: $key passed at $sha"; echo "kal-verify: exit 0"; } > "$log"
       echo "PASS (reused) $log"; exit 0
     fi
   done
 fi
 
+# A fresh log name for every run, so a red run's log survives the retry and later runs.
+fresh() {
+  f="$dir/$name-$short.log"; n=2
+  while [ -e "$f" ]; do f="$dir/$name-$short-$n.log"; n=$((n + 1)); done
+  echo "$f"
+}
+
 # One global slot per repo for the full Verify: a lock directory in the git common dir, shared by every worktree.
 # The Quick check takes no slot: by definition it needs no shared services.
-lock=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)/kal-verify.lock
+lock="$common/kal-verify.lock"
+log=$(fresh)
+: > "$log"
 # Touch the log every second, from now until Verify ends, so the Worker watchdog sees progress
 # while we wait for the slot and while a quiet suite runs. Stops by itself if we die.
 (while kill -0 $$ 2>/dev/null; do touch "$log"; sleep 1; done) </dev/null >/dev/null 2>&1 &
@@ -71,11 +84,24 @@ if [ "$name" = verify ]; then
   echo $$ > "$lock/pid"
 fi
 
-{ echo "commit $head"; echo "dirty files: $dirty"; } > "$log"
-# RTK_DISABLED: rtk compresses test output and hides failures.
-(cd "$wt" && RTK_DISABLED=1 sh -c "$cmd") >> "$log" 2>&1
-rc=$?
-echo "kal-verify: exit $rc" >> "$log"
+attempt() {
+  { echo "commit $head"; echo "dirty files: $dirty"; } > "$log"
+  # RTK_DISABLED: rtk compresses test output and hides failures.
+  (cd "$wt" && RTK_DISABLED=1 sh -c "$cmd") >> "$log" 2>&1
+  rc=$?
+  echo "kal-verify: exit $rc" >> "$log"
+}
+attempt
+if [ $rc -ne 0 ] && [ "$retry" = 1 ]; then
+  first=$log
+  log=$(fresh)
+  : > "$log"
+  attempt
+  if [ $rc -eq 0 ]; then
+    [ "$dirty" = 0 ] && echo "$head" >> "$passed"
+    echo "PASS (flaky: the first run failed, the retry passed) $first $log"; exit 0
+  fi
+fi
 [ $rc -eq 0 ] && [ "$dirty" = 0 ] && echo "$head" >> "$passed"
 if [ $rc -eq 0 ]; then echo "PASS $log"; else tail -n 40 "$log" >&2; echo "FAIL $log"; fi
 exit $rc

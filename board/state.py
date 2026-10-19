@@ -53,10 +53,11 @@ def summary(text):
     return next((l for l in lines[1:] if not l.startswith(("#", "Verdict:", "At:"))), "")
 
 
-def filed(text):
-    """The tickets a Run filed for later: its run.md `## Filed` lines, `- NN: title | status | ref` (ref: a tracker
-    path or URL). Loose on purpose: a line without the separators is kept as a title."""
-    body = text.split("\n## Filed", 1)[1].split("\n## ", 1)[0] if "\n## Filed" in text else ""
+def filed(text, name="Filed"):
+    """A run.md list section as items. `## Filed`: the tickets a Run filed for later, `- NN: title | status | ref`
+    (ref: a tracker path or URL). `## Decided`: decisions made while the user was away, `- NN: decision | why |
+    report`. Loose on purpose: a line without the separators is kept as a title."""
+    body = text.split(f"\n## {name}", 1)[1].split("\n## ", 1)[0] if f"\n## {name}" in text else ""
     out = []
     for line in body.splitlines():
         m = re.match(r"^\s*[-*]\s*(?:(\d+):\s*)?(.*)$", line)
@@ -116,7 +117,8 @@ def ticket_state(t, repo):
         shots += [str(p.relative_to(repo)) for p in sorted(rd.glob("*.png"))]
         for log in sorted(rd.glob("verify-*.log"), key=lambda p: p.stat().st_mtime):
             last = (log.read_text().strip().splitlines() or [""])[-1]
-            verify.append({"round": k, "sha": log.stem[7:], "passed": last == "kal-verify: exit 0",
+            verify.append({"round": k, "sha": log.stem.split("-")[1], "reused": log.stem.endswith("-reused"),
+                           "passed": last == "kal-verify: exit 0",
                            "log": str(log.relative_to(repo))})
 
     diff = {"files": 0, "insertions": 0, "deletions": 0, "commits": []}
@@ -181,7 +183,7 @@ def run_state(run_dir, repo):
             "counts": {"total": len(real), "merged": sum(t["status"] in ("merged", "dropped") for t in real),
                        "needs_you": sum(t["status"] == "needs-you" for t in real), "live": len(live),
                        "developers": sum(w["role"] == "developer" for w in live), "slots": 3},
-            "findings": sev, "tickets": ts, "filed": filed(text),
+            "findings": sev, "tickets": ts, "filed": filed(text), "decided": filed(text, "Decided"),
             "feed": [{"time": a, "ticket": b or None, "text": c} for a, b, c in feed[:200]]}
 
 
@@ -191,7 +193,11 @@ def state(repo):
     runs = [run_state(d, repo) for d in sorted(runs_dir.iterdir()) if (d / "run.md").is_file()] if runs_dir.is_dir() else []
     order = {"active": 0, "paused-finishing": 1, "needs-you": 2, "paused": 3, "stopped": 4, "finished": 5}
     runs.sort(key=lambda r: (order.get(r["state"], 9), r["started"] or ""), reverse=False)
-    return {"repo": str(repo), "name": repo.name, "generated": stamp(time.time()), "runs": runs}
+    try:  # the kal version serving this state: kal-board replaces a server left over from an older one
+        version = json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        version = None
+    return {"repo": str(repo), "name": repo.name, "kal": version, "generated": stamp(time.time()), "runs": runs}
 
 
 if __name__ == "__main__":

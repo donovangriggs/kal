@@ -72,7 +72,8 @@ def plugin_flags(repo):
 def testing_rule(role, t):
     """Rule 3 of the brief: who runs which checks. The full Verify is the merge's gate, so it runs as rarely as
     possible; the reviewer and security read code and never queue for the test slot."""
-    where = f"The repo's commands are in the `## Commands` block of `{t.worktree}/CLAUDE.md`."
+    where = (f"The repo's commands are in the `## Commands` block of the main checkout's `{t.repo}/CLAUDE.md` "
+             "(not the worktree's copy, which may be older).")
     full = (f"the full Verify only as `{VERIFY} {t.worktree} {t.round_dir()}` (it takes the repo's one test slot "
             "and reuses a passing log for an unchanged commit)")
     quick = f"the Quick check, when the block has one, as `{VERIFY} --quick {t.worktree} {t.round_dir()}`"
@@ -191,7 +192,7 @@ else:
         mcp += ["--mcp-config", str(tmp / "mcp.json")]
     claude = [shutil.which("claude") or "claude", "--agent", f"kal:{a.role}", *(["--model", a.model] if a.model else []),
               "--permission-mode", "dontAsk", "--session-id", sid, "--settings", str(tmp / "settings.json"),
-              "--add-dir", t.worktree, "--add-dir", str(t.run_dir), "-n", f"kal {title}", *plugin_flags(t.repo), *mcp]
+              "--add-dir", t.worktree, "--add-dir", str(t.run_dir), "--no-chrome", "-n", f"kal {title}", *plugin_flags(t.repo), *mcp]
     # The pane gets the tmux server's env, not ours: pass what claude needs. `--` ends the variadic flags before
     # the prompt. If claude dies without its Stop hook, the shell still signals.
     cmd = f'{shlex.join(claude)} -- "$(cat {shlex.quote(str(brief_file))})"; tmux wait-for -S "kal-done-$TMUX_PANE"'

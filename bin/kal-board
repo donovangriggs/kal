@@ -53,16 +53,25 @@ def serve(repo, port):
     http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
+VERSION = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+
+
 def ours(port, repo):
+    """'current': this repo's Board, from this kal version; 'stale': this repo's, from another version (left over
+    from before an update); None: nothing of ours answers there."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/state.json", timeout=2) as r:
-            return json.loads(r.read()).get("repo") == str(repo)
+            got = json.loads(r.read())
     except (OSError, ValueError):
-        return False
+        return None
+    if got.get("repo") != str(repo):
+        return None
+    return "current" if got.get("kal") == VERSION else "stale"
 
 
 def free(port):
     with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # like the server: a just-closed port is free
         try:
             s.bind(("127.0.0.1", port))
             return True
@@ -84,12 +93,21 @@ if args[:1] == ["--serve"]:
 port_file = repo / ".kal" / "board-port"
 port_file.parent.mkdir(parents=True, exist_ok=True)
 port = int(port_file.read_text().strip()) if port_file.is_file() and port_file.read_text().strip().isdigit() else 0
-if not (port and ours(port, repo)):
-    port = next(p for p in range(4100, 65536) if free(p))
+found = ours(port, repo) if port else None
+if found == "stale":  # an older kal's Board: replace it on the same port, so the URL stays the same
+    for pid in subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True).stdout.split():
+        subprocess.run(["kill", pid])
+    for _ in range(30):
+        if free(port):
+            break
+        time.sleep(0.1)
+    found = None
+if found != "current":
+    port = port if port and free(port) else next(p for p in range(4100, 65536) if free(p))
     subprocess.Popen([sys.executable, __file__, str(repo), "--serve", str(port)], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(50):
-        if ours(port, repo):
+        if ours(port, repo) == "current":
             break
         time.sleep(0.1)
     else:

@@ -314,6 +314,15 @@ Each milestone is usable on its own:
 
 ## 16. Status
 
+- After the first real run (new-zr-web, 13 tickets, 9h44m, 6.5h of it waiting overnight on one ticket's spec conflicts whose recommended options were all accepted), 0.8.0 adds:
+  - the **away policy**: measured recommendations are applied as provisional decisions and reviewed at the hand-off;
+  - **browser QA that really runs**: `--no-chrome` on workers, the chrome-devtools server warmed at start, QA waits for it, and a `Browser:` line is retried once and then surfaced;
+  - **a retry before a red merge counts**, with flaky tests proposed as backlog;
+  - **Commands read from the main checkout**;
+  - **unmeasured gates flagged** in `/kal:write-spec`;
+  - **`kal-pause`**, which waits until the run has stopped;
+  - **Verify logs that are never overwritten**;
+  - **`/kal:board`**, and a Board that replaces an older version's server by itself.
 - Milestone 5 (polish) is done:
   - `kal-doctor` exists, and `/kal:setup` was run end to end on a fresh repo (its Makefile-derived commands confirmed and committed).
   - A real install was verified: `claude plugin marketplace add donovangriggs/kal` plus `claude plugin install kal@kal --scope project`, then a `/kal:build` with no `--plugin-dir` anywhere.

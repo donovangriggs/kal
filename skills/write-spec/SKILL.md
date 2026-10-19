@@ -15,9 +15,15 @@ The issue tracker should already be configured (see `docs/agents/issue-tracker.m
 
 3. **Agree the test seams.** Work out where the feature will be tested. Prefer seams that already exist over new ones, and the highest seam available over lower ones. If a new seam is needed, put it as high as you can. Fewer seams is better; one is ideal. Confirm them with the user through the AskUserQuestion tool: one question listing the proposed seams with a one-line note on what each catches and what it misses, with "use these seams" as the recommended option. These seams are what the developer agents will test at later, without asking again.
 
-4. **Write and publish.** Fill in the template below, publish it to the issue tracker, and apply the `ready-for-agent` label. No further triage is needed.
+4. **Check the numbers.** List every numeric gate or budget the spec sets (a page weight, a load time, a Lighthouse score, a size limit, a latency, a coverage floor). For each, ask: has anyone measured the real thing against it? A target nobody has measured is the commonest way a build stops overnight: a developer finds it can't be met, and the run waits for a decision. For each unmeasured one, ask through AskUserQuestion:
+   - **Measure it now (Recommended when it's cheap):** have a subagent measure the current state, and set the number from what it finds.
+   - **Write it as a target with a rule:** for example "LCP ≤ 2500 ms; if the measured floor is higher, gate at the floor + 10% and report it". Builds can then settle it without stopping.
+   - **Keep it as a hard gate:** a build that can't meet it stops for you.
+   Write the answer into the spec beside the gate.
 
-5. **Offer the next step.** Ask with AskUserQuestion whether to slice the spec into tickets now, recommending "Run /kal:slice-tickets". If they say yes, call the Skill tool with "kal:slice-tickets".
+5. **Write and publish.** Fill in the template below, publish it to the issue tracker, and apply the `ready-for-agent` label. No further triage is needed.
+
+6. **Offer the next step.** Ask with AskUserQuestion whether to slice the spec into tickets now, recommending "Run /kal:slice-tickets". If they say yes, call the Skill tool with "kal:slice-tickets".
 
 <spec-template>
 

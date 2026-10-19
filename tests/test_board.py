@@ -64,3 +64,11 @@ class Filed(unittest.TestCase):
         self.assertEqual(filed(text), [
             {"nn": "14", "title": "Guard slugs", "status": "backlog", "ref": ".scratch/s/issues/14-a.md"},
             {"nn": None, "title": "just a note", "status": None, "ref": None}])
+
+
+class Decided(unittest.TestCase):
+    def test_decided_lines_parse(self):
+        from state import filed
+        text = "# Run\n\n## Decided\n\n- 12: thumb 400w WebP | 446 KB measured, passes | reports/12/round-1/dev.md\n"
+        self.assertEqual(filed(text, "Decided"), [{"nn": "12", "title": "thumb 400w WebP",
+                                                   "status": "446 KB measured, passes", "ref": "reports/12/round-1/dev.md"}])
