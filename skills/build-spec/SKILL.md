@@ -19,13 +19,17 @@ The per-ticket pipeline is the one in `/kal:build`. **Read [../build/SKILL.md](.
 
 ## 1. Preflight
 
-1. **Fetch the spec and every ticket under it**, the way `docs/agents/issue-tracker.md` says. State the spec's title and the number of tickets. The feature slug is the spec's slug.
-2. **Write the mirrors.** Write one mirror per ticket at `.kal/runs/<feature>/tickets/<NN>-<slug>.md`, in the format of `/kal:build`'s Preflight step 2. `NN` follows the slice order: blockers get lower numbers. Translate each ticket's blocking edges into its mirror's `Blocked by:` as mirror numbers. Copy the spec to `.kal/runs/<feature>/spec.md`. Skip any mirror that exists already: that's a resume.
-3. **Start.** Run `kal-start .kal/runs/<feature> --mode build-spec`.
+1. **Fetch the spec and every ticket under it**, the way `docs/agents/issue-tracker.md` says. State the spec's title and the number of tickets. The feature slug is the spec's slug, and the Run folder is `.kal/runs/<feature>`.
+   - **A follow-up run:** if that folder's `run.md` has a `Finished:` line, the spec was built before. Look for its tickets that aren't done (not `done`, `resolved` or closed).
+     - **Backlog tickets** (like the ones the last run filed for later): ask which to build now, in multi-select questions (4 options per question, more questions if needed). Promote the picked ones to `ready-for-agent` the way the tracker doc says.
+     - **Nothing to build:** if no ticket is `ready-for-agent` after that, say so and stop.
+     - Otherwise this is a new Run in `.kal/runs/<feature>-<n>`, with `n` the first free number from 2 (`zr-seo` → `zr-seo-2`). Use that folder everywhere below; the finished run stays on the board as history. Mirror **only** the tickets being built, keeping their numbers. In `Blocked by:`, drop blockers that are already done: they merged in an earlier run.
+2. **Write the mirrors.** Write one mirror per ticket at `<run folder>/tickets/<NN>-<slug>.md`, in the format of `/kal:build`'s Preflight step 2. `NN` follows the slice order: blockers get lower numbers. Translate each ticket's blocking edges into its mirror's `Blocked by:` as mirror numbers. Copy the spec to `<run folder>/spec.md`. Skip any mirror that exists already: that's a resume.
+3. **Start.** Run `kal-start <run folder> --mode build-spec`.
    - **Exit 1:** show the line and stop.
    - **Exit 3:** tell the user to run `/kal:setup` and stop.
    - **Exit 4:** another Run is active. Ask: pause it (recommended) / stop. To pause, run `touch <its run dir>/pause`, then tell the user to run this command again once its panes have closed. Then stop.
-   - **Exit 0:** `first start`, `resume` or `finished`. On `finished`, say so and stop.
+   - **Exit 0:** `first start`, `resume` or `finished`. On `finished`, go back to step 1's follow-up run.
    Then run `kal-board` and print the URL it prints, once: `Board: <url>`. Don't repeat it later.
 4. **On a resume:** read `run.md`'s `## Notes` (your handoff from before a Relay) and each mirror's `## Log`. Re-attach a waiter to every worker listed in any `Workers:` line (`kal-worker <role> <ticket> [--as <name>] --attach <pane id>`, in the background). Pick up each ticket from its status. If `run.md` says `Phase: final`, continue at section 6.
 5. Go to section 3.
@@ -85,7 +89,7 @@ Then run section 3 again.
    - a **qa** with the notes `mode: full` and `browser: yes|no` (yes when the spec changes something a user sees and the Commands block has a Dev server)
    - a **security** worker, when the whole diff touches a security trigger
 4. **Fixes:** the same rules as `/kal:build` section 5, but the fixer is a **developer** with `--model <yours>` and a note naming every report to answer. At most 2 rounds, re-running only the checks that failed. After that, it needs you: ask retry with a note / stop.
-5. **Out-of-scope proposals:** if `proposals.md` has any, ask in one multi-select question which to file in the tracker as `backlog`.
+5. **Out-of-scope proposals:** if `proposals.md` has any, ask which to file in the tracker as `backlog` (multi-select, 4 options per question). Give each filed ticket the spec's next free ticket number, and record it on the Run so the board shows it: `kal-set <run folder>/run.md --append Filed "- <NN>: <title> | backlog | <tracker path or URL>"`. A later `/kal:build-spec` on this spec offers them as a follow-up run.
 6. **Hand-off:** ask how to finish, recommending what fits the repo:
    - **Open a PR:** push the integration branch and open a PR into the target, the way the tracker doc says (`gh pr create` / `glab mr create`). The body summarises the spec and lists the tickets it closes. Then run `kal-finish .kal/runs/<feature> --keep-branch`.
    - **Merge into `<target>`:** run `kal-finish .kal/runs/<feature> --merge-into <target>`.

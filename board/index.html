@@ -412,7 +412,7 @@ function renderRuns(cur) {
     const ny = r.counts.total ? r.counts.needs_you / r.counts.total * 100 : 0;
     return `<button class="run ${r === cur ? "on" : ""}" data-run="${esc(r.feature)}">
       <div class="top"><span class="name">${esc(r.feature)}</span>${statePill(r.state)}</div>
-      <div class="meta">${r.counts.merged}/${r.counts.total} merged · ${esc(r.phase || "")} · ${elapsed(r)}</div>
+      <div class="meta">${r.counts.merged}/${r.counts.total} merged · ${esc(r.phase || "")} · ${elapsed(r)}${(r.filed || []).length ? ` · ${r.filed.length} filed` : ""}</div>
       <div class="bar"><i style="width:${pct}%;background:var(--pass)"></i><i style="width:${ny}%;background:var(--block)"></i></div>
     </button>`;
   }).join("") : `<div class="empty-note" style="padding:10px">No runs yet.</div>`;
@@ -448,6 +448,9 @@ function renderRail(run) {
       ${finds.length ? `<div class="sev">${SEVS.filter((s) => counts[s]).map((s) => `<button class="sevb ${ui.sev === s ? "on" : ""}" data-sev="${s}"><b class="c-${s}">${counts[s]}</b><small class="c-${s}">${s}</small></button>`).join("")}</div>
         <div class="flist">${shown.map((f) => `<div class="find click" data-nn="${esc(f.t.nn)}"><div class="who">${esc(f.t.nn)} · ${esc(f.s.name)} · round ${f.s.round}${f.blocking ? " · blocking" : ""}</div>${esc(f.text)}</div>`).join("")}</div>`
         : `<div class="empty-note">No findings.</div>`}</section>
+    ${(run.filed || []).length ? `<section><h3>Filed for later <span>${run.filed.length}</span></h3>
+      <div class="flist">${run.filed.map((f) => `<div class="find"><div class="who">${f.nn ? esc(f.nn) + " · " : ""}${esc(f.status || "filed")}</div>${esc(f.title)}${f.ref ? `<div class="mono faint" style="font-size:11px;margin-top:3px;word-break:break-all">${/^https?:\/\//.test(f.ref) ? `<a href="${esc(f.ref)}" target="_blank" rel="noopener">${esc(f.ref)}</a>` : esc(f.ref)}</div>` : ""}</div>`).join("")}</div>
+      <div class="empty-note" style="margin-top:6px">Run <span class="mono">/kal:build-spec</span> on this spec again to build them in a follow-up run.</div></section>` : ""}
     <section><h3>Activity <span>${run.feed.length}</span></h3><div class="feed">${run.feed.slice(0, 20).map((e) => `<div><span class="faint mono">${esc(String(e.time || "").slice(11))}</span><span class="mono faint">${esc(e.ticket || "")}</span><span>${esc(e.text)}</span></div>`).join("") || `<div class="empty-note">No activity.</div>`}</div></section>`;
 }
 

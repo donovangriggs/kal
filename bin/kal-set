@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """kal-set FILE [Key=value ...] [--worker "ROLE MODEL PANE HH:MM" ...] [--no-worker ROLE] [--notes FILE|-]
-[--log MESSAGE]: the Orchestrator's one way to edit a Ticket or the Run file.
+[--log MESSAGE] [--append SECTION LINE ...]: the Orchestrator's one way to edit a Ticket or the Run file.
 
 Each Key=value replaces that header line (plain `Key: v` or bold `**Key:** v`, keeping its style; the header is
 the text before the first `## ` heading), or adds a plain one after the block of header lines that holds
@@ -10,7 +10,8 @@ that Role's entry. The other Workers stay listed. --log appends `<YYYY-MM-DD HH:
 the `## Log` section (before any later `## ` heading), adding the heading at the end if it's missing. --notes
 replaces the body of the `## Notes` section (up to the next `## ` heading) with FILE's text, or stdin's for `-`,
 adding the heading at the end if it's missing: the Relay's rewrite of the Run file's Notes. The text may not
-hold a `## ` heading.
+hold a `## ` heading. --append SECTION LINE adds LINE as the last line of the `## SECTION` section (adding the
+heading at the end if it's missing), e.g. a Run's `## Filed` list of the tickets it filed for later.
 """
 import argparse
 import re
@@ -28,6 +29,7 @@ p.add_argument("--log")
 p.add_argument("--notes", type=argparse.FileType(), metavar="FILE|-")
 p.add_argument("--worker", action="append", default=[], metavar="ROLE MODEL PANE HH:MM")
 p.add_argument("--no-worker", metavar="ROLE")
+p.add_argument("--append", nargs=2, action="append", default=[], metavar=("SECTION", "LINE"))
 a = p.parse_args()
 text = a.file.read_text()
 lines = text.splitlines()
@@ -74,6 +76,14 @@ if a.notes:
         p.error("--notes text can't hold a `## ` heading (it would end the section); use `### `")
     start, end = section("Notes")
     lines[start + 1:end] = ([""] + notes.splitlines() if notes else []) + ([""] if end < len(lines) else [])
+
+for name, line in a.append:
+    start, end = section(name)
+    body = lines[start + 1:end]
+    while body and not body[-1].strip():
+        body.pop()
+    body += ([""] if not body else []) + [line]
+    lines[start + 1:end] = body + ([""] if end < len(lines) else [])
 
 if a.log:
     start, end = section("Log")

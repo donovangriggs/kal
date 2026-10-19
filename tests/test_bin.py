@@ -572,3 +572,14 @@ class Batch(BatchRepo):
         self.assertIn("01 0 merged 01", r.stdout)
         self.assertIn("02 4 ", r.stdout)
         self.assertNotEqual(self.text(b, "Status"), "merged")  # the orchestrator sends it to the merger
+
+
+class Append(Repo):
+    def test_append_adds_a_line_to_a_section(self):
+        kal("kal-start", str(self.run_dir), cwd=self.repo)
+        run_md = self.run_dir / "run.md"
+        for line in ("- 14: Guard empty slugs | backlog | .scratch/x/issues/14-a.md", "- 15: Fix title | backlog | .scratch/x/issues/15-b.md"):
+            self.assertEqual(kal("kal-set", str(run_md), "--append", "Filed", line, cwd=self.repo).returncode, 0)
+        text = run_md.read_text()
+        self.assertIn("## Filed\n\n- 14: Guard empty slugs", text)
+        self.assertLess(text.index("- 14:"), text.index("- 15:"))

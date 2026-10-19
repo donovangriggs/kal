@@ -55,3 +55,12 @@ class BoardState(Repo):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Filed(unittest.TestCase):
+    def test_filed_lines_parse(self):
+        from state import filed
+        text = "# Run\n\n## Log\n\nx\n\n## Filed\n\n- 14: Guard slugs | backlog | .scratch/s/issues/14-a.md\n- just a note\n"
+        self.assertEqual(filed(text), [
+            {"nn": "14", "title": "Guard slugs", "status": "backlog", "ref": ".scratch/s/issues/14-a.md"},
+            {"nn": None, "title": "just a note", "status": None, "ref": None}])

@@ -53,6 +53,20 @@ def summary(text):
     return next((l for l in lines[1:] if not l.startswith(("#", "Verdict:", "At:"))), "")
 
 
+def filed(text):
+    """The tickets a Run filed for later: its run.md `## Filed` lines, `- NN: title | status | ref` (ref: a tracker
+    path or URL). Loose on purpose: a line without the separators is kept as a title."""
+    body = text.split("\n## Filed", 1)[1].split("\n## ", 1)[0] if "\n## Filed" in text else ""
+    out = []
+    for line in body.splitlines():
+        m = re.match(r"^\s*[-*]\s*(?:(\d+):\s*)?(.*)$", line)
+        if not m or not m[2].strip():
+            continue
+        title, status, ref = (m[2].split(" | ") + ["", ""])[:3]
+        out.append({"nn": m[1], "title": title.strip(), "status": status.strip() or None, "ref": ref.strip() or None})
+    return out
+
+
 def latest_action(pane):
     """A live Worker's newest tool call, from its transcript (its session id is in the pane's start command)."""
     m = re.search(r"--session-id (\S+)", sh("tmux", "display", "-p", "-t", pane, "#{pane_start_command}"))
@@ -167,7 +181,7 @@ def run_state(run_dir, repo):
             "counts": {"total": len(real), "merged": sum(t["status"] in ("merged", "dropped") for t in real),
                        "needs_you": sum(t["status"] == "needs-you" for t in real), "live": len(live),
                        "developers": sum(w["role"] == "developer" for w in live), "slots": 3},
-            "findings": sev, "tickets": ts,
+            "findings": sev, "tickets": ts, "filed": filed(text),
             "feed": [{"time": a, "ticket": b or None, "text": c} for a, b, c in feed[:200]]}
 
 

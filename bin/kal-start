@@ -82,7 +82,8 @@ LIVE = ("in-dev", "in-review", "fixing", "ready-to-merge", "merging", "parked", 
 if run_md.exists():
     text = run_md.read_text()
     if field("Finished", text):
-        stop(0, f"finished at {field('Finished', text)}: this Run is done")
+        stop(0, f"finished at {field('Finished', text)}: this Run is done; to build the spec's remaining or "
+                "backlog tickets, start a follow-up Run in <run dir>-2 (/kal:build-spec does this by itself)")
     live = [t for t in (run_dir / "tickets").glob("*.md") if field("Status", t.read_text()) in LIVE]
     if live or field("Mode", text) != "build":
         (run_dir / "pause").unlink(missing_ok=True)

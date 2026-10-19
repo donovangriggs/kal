@@ -121,7 +121,7 @@ Run `kal-set <ticket> Status=needs-you --log "<reason in one line, naming the re
 ## Finish
 
 1. Close the ticket the way the tracker doc says.
-2. If any follow-up or out-of-scope proposals were collected, ask in one multi-select question which to file: follow-ups as `ready-for-agent`, out-of-scope ones as `backlog`.
+2. If any follow-up or out-of-scope proposals were collected, ask in one multi-select question which to file: follow-ups as `ready-for-agent`, out-of-scope ones as `backlog`. Record each filed ticket on the Run so the board shows it: `kal-set .kal/runs/<feature>/run.md --append Filed "- <NN>: <title> | <status> | <tracker path or URL>"`.
 3. If `refine.md` has findings for this ticket, mention the count, and offer `/kal:refine-code` on the merged change.
 4. Run `kal-set .kal/runs/<feature>/run.md --log "<NN> merged"` and `kal-notify "kal: <NN> merged"`. A single-ticket Run folder stays open: the feature's next `/kal:build` reuses it.
 5. Report to the user: the merge commit on the base branch, the rounds used, the checks that ran, and findings by severity.
