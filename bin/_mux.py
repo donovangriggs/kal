@@ -55,12 +55,22 @@ def _result(*args):
     return json.loads(out)["result"] if out.strip() else {}
 
 
-def _rpc(method, **params):
-    """One socket API call, for the methods the CLI lacks; its result ({} on an error)."""
-    with socket.socket(socket.AF_UNIX) as s:
-        s.settimeout(10)
+def _connect(method, params):
+    """A socket to herdr that has sent one API request."""
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(10)
+    try:
         s.connect(SOCK)
         s.sendall((json.dumps({"id": "kal", "method": method, "params": params}) + "\n").encode())
+    except OSError:
+        s.close()
+        raise
+    return s
+
+
+def _rpc(method, **params):
+    """One socket API call, for the methods the CLI lacks; its result ({} on an error)."""
+    with _connect(method, params) as s:
         return json.loads(s.makefile().readline()).get("result") or {}
 
 
@@ -70,7 +80,7 @@ def is_herdr(pane):
 
 def inside():
     """The caller runs in a multiplexer pane."""
-    return bool(os.environ.get("TMUX_PANE")) or BACKEND == "herdr"
+    return bool(os.environ.get("TMUX_PANE")) or os.environ.get("HERDR_ENV") == "1"
 
 
 def caller():
@@ -222,12 +232,9 @@ def waiter(pane):
     herdr doesn't replay events, so check alive() after it."""
     if not is_herdr(pane):
         return subprocess.Popen(["tmux", "wait-for", f"kal-done-{pane}"])
-    s = socket.socket(socket.AF_UNIX)
-    s.settimeout(10)
-    s.connect(SOCK)
     subs = [{"type": "pane.closed"}, {"type": "pane.exited", "pane_id": pane},
             {"type": "pane.agent_status_changed", "pane_id": pane}]
-    s.sendall((json.dumps({"id": "kal", "method": "events.subscribe", "params": {"subscriptions": subs}}) + "\n").encode())
+    s = _connect("events.subscribe", {"subscriptions": subs})
     w = types.SimpleNamespace(sock=s, pane=pane, buf=b"", kill=s.close)
     _line(w, time.time() + 10)  # subscription_started
     return w

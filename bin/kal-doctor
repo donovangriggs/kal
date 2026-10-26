@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mux  # noqa: E402
 from _kal import commands, kal_loaded  # noqa: E402
 
 rows, blocking = [], False
@@ -71,12 +72,12 @@ else:
     check(bool(commands(repo)["Verify"]), "CLAUDE.md has a Commands block with a Verify command", "run /kal:setup")
     ignored = not subprocess.run(["git", "check-ignore", "-q", ".kal/runs"], cwd=repo).returncode
     check(ignored, ".kal/ is gitignored", "run /kal:setup (or add .kal/ to .gitignore)")
-mux = "tmux" if os.environ.get("TMUX_PANE") else "herdr" if os.environ.get("HERDR_ENV") == "1" else None
+mux = _mux.BACKEND if _mux.inside() else None
 check(mux, f"this shell is inside {mux or 'tmux or herdr'} (builds need it)",
       "tmux new -A -s kal claude, or start claude in a herdr pane", need=False)
 if mux == "herdr":
     try:
-        server = json.loads(out(os.environ.get("HERDR_BIN_PATH") or "herdr", "status", "--json") or "{}")["server"]
+        server = json.loads(out(_mux.HERDR, "status", "--json") or "{}")["server"]
     except (ValueError, KeyError, TypeError):
         server = {}
     check(server.get("compatible"), f"herdr's server is compatible with its client (server {server.get('version', '?')})",
