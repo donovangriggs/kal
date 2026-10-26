@@ -709,3 +709,22 @@ class Mux(unittest.TestCase):
         inner = self.split("right", self.pane("w1:p1"), self.column("w1:p3", "w1:p4"))
         tree = self.split("right", self.split("down", inner, self.pane("w1:p2")), self.pane("w1:p9"))
         self.assertEqual(self.mux.rebalance(tree, "w1:p1"), [([False, False, True], 1 / 2)])
+
+    def test_alive_only_believes_a_pane_is_gone_when_the_multiplexer_says_so(self):
+        from unittest import mock
+        fake = Path(tempfile.mkdtemp(prefix="kal-mux-")) / "herdr"
+        for script, want in [("echo '{\"result\":{}}'", True),
+                             ("echo '{\"error\":{\"code\":\"pane_not_found\"}}' >&2; exit 1", False),
+                             ("echo '{\"error\":{\"code\":\"server_not_running\"}}' >&2; exit 1", False),
+                             ("echo '{\"error\":{\"code\":\"internal\"}}' >&2; exit 1", True)]:
+            fake.write_text(f"#!/bin/sh\n{script}\n")
+            fake.chmod(0o755)
+            with mock.patch.object(self.mux, "HERDR", str(fake)):
+                self.assertEqual(self.mux.alive("w1:p3"), want, script)
+        with mock.patch.object(self.mux, "HERDR", str(fake.parent / "missing")):
+            self.assertFalse(self.mux.alive("w1:p3"))
+        slow = mock.Mock(side_effect=subprocess.TimeoutExpired("x", 10))
+        with mock.patch.object(self.mux.subprocess, "run", slow):
+            self.assertTrue(self.mux.alive("w1:p3"))
+            self.assertTrue(self.mux.alive("%4", "01 developer"))
+            self.assertEqual(self.mux.title("%4"), "")

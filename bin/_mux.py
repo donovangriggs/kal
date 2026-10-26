@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -33,12 +34,14 @@ def _tmux(*args):
 
 
 def _show(pane, fmt):
-    """`fmt` expanded for a pane; empty once the pane is gone (or tmux isn't there)."""
+    """`fmt` expanded for a pane; empty once the pane is gone (or tmux isn't there), None if tmux didn't answer."""
     try:
         return subprocess.run(["tmux", "display", "-p", "-t", pane, fmt], capture_output=True, text=True,
                               timeout=10).stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return ""
+    except subprocess.TimeoutExpired:
+        return None
 
 
 def _herdr(*args):
@@ -162,26 +165,51 @@ def _herdr_split(cmd, env, cwd, title):
     fd, script = tempfile.mkstemp(prefix="kal-pane-", suffix=".sh")
     with os.fdopen(fd, "w") as f:
         f.write(f'rm -f "$0"\n{cmd}\n')
-    subprocess.run([HERDR, "pane", "run", pane, f"exec sh {script}"], check=True, capture_output=True)
-    subprocess.run([HERDR, "pane", "rename", pane, title], check=True, capture_output=True)
+    try:
+        subprocess.run([HERDR, "pane", "run", pane, f"exec sh {shlex.quote(script)}"], check=True, capture_output=True)
+        subprocess.run([HERDR, "pane", "rename", pane, title], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        kill(pane)  # not an empty shell left beside the orchestrator
+        raise
     for path, ratio in rebalance(_layout(), me):
         _rpc("layout.set_split_ratio", tab_id=os.environ["HERDR_TAB_ID"], path=path, ratio=ratio)
     return pane
 
 
+def _herdr_gone(pane):
+    """herdr says the pane is gone (or herdr itself is). A slow or failed call isn't proof: the Worker counts as
+    alive, and the watchdog's stall timeout still catches one that really hangs."""
+    try:
+        r = subprocess.run([HERDR, "pane", "get", pane], capture_output=True, text=True, timeout=10)
+    except OSError:
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+    if r.returncode == 0:
+        return False
+    try:
+        code = json.loads(r.stderr)["error"]["code"]
+    except (ValueError, KeyError, TypeError):
+        return False
+    return code in ("pane_not_found", "server_not_running")
+
+
 def alive(pane, title=None):
-    """The pane is still open. A title guards against a pane id reused by a restarted tmux (herdr never reuses one)."""
+    """The pane is still open. A title guards against a pane id reused by a restarted tmux (herdr never reuses one).
+    A multiplexer that doesn't answer in time counts as alive: ending the wait early would start a second Worker."""
     if is_herdr(pane):
-        return bool(_result("pane", "get", pane))
+        return not _herdr_gone(pane)
     if title is not None:
-        return _show(pane, "#{pane_id} #{pane_title}") == f"{pane} {title}"
-    return bool(pane) and _show(pane, "#{pane_id}") == pane
+        shown = _show(pane, "#{pane_id} #{pane_title}")
+        return shown is None or shown == f"{pane} {title}"
+    shown = _show(pane, "#{pane_id}")
+    return bool(pane) and (shown is None or shown == pane)
 
 
 def title(pane):
     if is_herdr(pane):
         return _result("pane", "get", pane).get("pane", {}).get("label") or ""
-    return _show(pane, "#{pane_title}")
+    return _show(pane, "#{pane_title}") or ""
 
 
 def sid_in(command):
@@ -195,7 +223,7 @@ def session_id(pane):
     if is_herdr(pane):
         procs = _result("pane", "process-info", "--pane", pane).get("process_info", {}).get("foreground_processes", [])
         return sid_in(" ".join(a for p in procs for a in p.get("argv", [])))
-    return sid_in(_show(pane, "#{pane_start_command}"))
+    return sid_in(_show(pane, "#{pane_start_command}") or "")
 
 
 def screen(pane):
