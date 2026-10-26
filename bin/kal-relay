@@ -3,9 +3,12 @@
 # Stop types /clear into this pane, SessionStart:clear types the resume line and drops the request.
 set -eu
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "usage: kal-relay \"<resume line>\"" >&2; exit 2; }
-pane=${TMUX_PANE:?kal-relay: not inside tmux}
+# The pane: tmux's %N, else herdr's wN:pM, filed as h-wN-pM so it can't clash with a tmux id.
+if [ -n "${TMUX_PANE:-}" ]; then key=${TMUX_PANE#%}
+elif [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then key=h-$(printf '%s' "$HERDR_PANE_ID" | tr -c 'A-Za-z0-9_-' -)
+else echo "kal-relay: not inside tmux or herdr" >&2; exit 1; fi
 # ponytail: keyed by pane id only; two tmux servers with the same pane id would share a request
-req="${TMPDIR:-/tmp}/kal-relay-${pane#%}"
+req="${TMPDIR:-/tmp}/kal-relay-$key"
 rm -f "$req.clearing"   # a stale marker from a Relay that never landed would block this one's /clear
 printf '%s' "$1" > "$req"
 echo "relay requested: end your turn now"

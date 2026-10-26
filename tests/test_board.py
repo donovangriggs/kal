@@ -49,6 +49,19 @@ class BoardState(Repo):
         self.assertEqual(ticket["diff"]["files"], 1)
         self.assertEqual(run["findings"], {"HIGH": 1, "LOW": 1})
 
+    def test_a_live_workers_herdr_status_comes_through(self):
+        from unittest import mock
+        import state as st
+        kal("kal-start", str(self.run_dir), cwd=self.repo)
+        t = self.ticket()
+        kal("kal-set", str(t), "--worker", "qa sonnet w1:p3 10:00", "--worker", "reviewer sonnet %9 10:00", cwd=self.repo)
+        with mock.patch.object(st, "pane_open", lambda p: p == "w1:p3"), \
+                mock.patch.object(st, "latest_action", lambda p: "Bash: npm test"), \
+                mock.patch.object(st._mux, "status", lambda p: "blocked"):
+            ws = state(self.repo)["runs"][0]["tickets"][0]["workers"]
+        self.assertEqual([(w["role"], w["open"], w["status"]) for w in ws],
+                         [("qa", True, "blocked"), ("reviewer", False, None)])
+
     def test_no_runs_is_an_empty_board(self):
         self.assertEqual(state(self.repo)["runs"], [])
 

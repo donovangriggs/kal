@@ -149,7 +149,7 @@ class VerifyRed(Repo):
 
 class Start(Repo):
     def test_needs_tmux(self):
-        env = {k: v for k, v in ENV.items() if k != "TMUX_PANE"}
+        env = {k: v for k, v in ENV.items() if k not in ("TMUX_PANE", "HERDR_ENV")}
         r = kal("kal-start", str(self.run_dir), cwd=self.repo, env=env)
         self.assertEqual(r.returncode, 1)
         self.assertIn("tmux new", r.stdout)
@@ -634,3 +634,78 @@ class Pause(Repo):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue((self.run_dir / "pause").exists())
         self.assertIn("has stopped", r.stdout)
+
+
+class Herdr(unittest.TestCase):
+    """The pane-side scripts inside herdr (no TMUX_PANE), with a fake `herdr` that logs its args."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kal-herdr-"))
+        (self.tmp / "bin").mkdir()
+        for tool in ("herdr", "osascript"):
+            (self.tmp / "bin" / tool).write_text(f'#!/bin/sh\necho "$@" >> {self.tmp}/{tool}.log\n')
+            (self.tmp / "bin" / tool).chmod(0o755)
+        self.env = {**{k: v for k, v in ENV.items() if k != "TMUX_PANE"}, "HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p3",
+                    "HERDR_BIN_PATH": str(self.tmp / "bin" / "herdr"), "TMPDIR": str(self.tmp),
+                    "PATH": f"{self.tmp / 'bin'}:{os.environ['PATH']}"}
+
+    def test_relay_files_the_request_under_a_safe_key(self):
+        r = kal("kal-relay", "resume loans", cwd=self.tmp, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.tmp / "kal-relay-h-w1-p3").read_text(), "resume loans")
+
+    def test_relay_hook_without_a_request_does_nothing(self):
+        for event in ("stop", "clear"):
+            self.assertEqual(kal("kal-relay-hook", event, cwd=self.tmp, env=self.env).returncode, 0)
+        self.assertFalse((self.tmp / "herdr.log").exists())
+        self.assertFalse((self.tmp / "kal-relay-h-w1-p3.clearing").exists())
+
+    def test_notify_shows_a_herdr_toast(self):
+        self.assertEqual(kal("kal-notify", "run finished", cwd=self.tmp, env=self.env).returncode, 0)
+        self.assertEqual((self.tmp / "herdr.log").read_text(), "notification show kal --body run finished --sound request\n")
+
+
+class Mux(unittest.TestCase):
+    """_mux's pure parts: the backend a pane id names, the session id in a command, herdr's column rebalance."""
+
+    def setUp(self):
+        sys.path.insert(0, str(BIN))
+        import _mux
+        self.mux = _mux
+
+    def test_backend_by_pane_id(self):
+        for pane in ("w1:p9", "w1:pA", "w12:p14"):
+            self.assertTrue(self.mux.is_herdr(pane), pane)
+        for pane in ("%12", "", None, "w1:t1", "w1"):
+            self.assertFalse(self.mux.is_herdr(pane), pane)
+
+    def test_session_id_in_a_command(self):
+        argv = ["/usr/bin/claude", "--agent", "kal:qa", "--session-id", "abc-123", "--settings", "/s.json"]
+        self.assertEqual(self.mux.sid_in(" ".join(argv)), "abc-123")
+        self.assertEqual(self.mux.sid_in("claude --session-id=x9"), "x9")
+        self.assertIsNone(self.mux.sid_in("claude --resume"))
+
+    @staticmethod
+    def pane(p):
+        return {"type": "pane", "pane_id": p}
+
+    def split(self, direction, first, second):
+        return {"type": "split", "direction": direction, "ratio": 0.5, "first": first, "second": second}
+
+    def column(self, *workers):
+        node = self.pane(workers[-1])
+        for w in reversed(workers[:-1]):
+            node = self.split("down", self.pane(w), node)
+        return node
+
+    def test_rebalance_one_and_three_workers(self):
+        self.assertEqual(self.mux.rebalance(self.pane("w1:p1"), "w1:p1"), [])
+        self.assertEqual(self.mux.rebalance(self.split("right", self.pane("w1:p1"), self.column("w1:p2")), "w1:p1"), [])
+        tree = self.split("right", self.pane("w1:p1"), self.column("w1:p2", "w1:p3", "w1:p4"))
+        self.assertEqual(self.mux.rebalance(tree, "w1:p1"), [([True], 1 / 3), ([True, True], 1 / 2)])
+
+    def test_rebalance_with_an_unrelated_pane(self):
+        # The user's own pane under the orchestrator and one more to the far right: only the Workers' column moves.
+        inner = self.split("right", self.pane("w1:p1"), self.column("w1:p3", "w1:p4"))
+        tree = self.split("right", self.split("down", inner, self.pane("w1:p2")), self.pane("w1:p9"))
+        self.assertEqual(self.mux.rebalance(tree, "w1:p1"), [([False, False, True], 1 / 2)])

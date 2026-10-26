@@ -1,22 +1,36 @@
 #!/bin/sh
 # The plugin's Relay hooks (hooks/hooks.json). Without a request for this pane (written by kal-relay)
-# both do nothing, so they're harmless in Workers and outside tmux.
+# both do nothing, so they're harmless in Workers and outside tmux or herdr.
 #   stop   Stop hook: type /clear into the pane, once per request even if Stop fires again
 #   clear  SessionStart, matcher clear: type the resume line into the fresh context, drop the request
 # Keys are typed detached after a short delay, so the hook returns before they land. If a new turn
 # started meanwhile (a Worker finished), the keys queue behind it. KAL_RELAY_DELAY (s) tunes the wait.
-pane=${TMUX_PANE:-}
-[ -n "$pane" ] || exit 0
-req="${TMPDIR:-/tmp}/kal-relay-${pane#%}"
+# The pane is tmux's %N, else herdr's wN:pM (its request file is h-wN-pM, as kal-relay names it).
+herdr=
+if [ -n "${TMUX_PANE:-}" ]; then pane=$TMUX_PANE key=${pane#%}
+elif [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  pane=$HERDR_PANE_ID key=h-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' -) herdr=${HERDR_BIN_PATH:-herdr}
+else exit 0; fi
+req="${TMPDIR:-/tmp}/kal-relay-$key"
 [ -f "$req" ] || exit 0
 d=${KAL_RELAY_DELAY:-2}
 case ${1:-} in
   stop)
     [ -f "$req.clearing" ] && exit 0
     touch "$req.clearing"
-    nohup sh -c 'sleep "$1"; tmux send-keys -t "$2" /clear Enter' sh "$d" "$pane" </dev/null >/dev/null 2>&1 & ;;
+    if [ -z "$herdr" ]; then
+      nohup sh -c 'sleep "$1"; tmux send-keys -t "$2" /clear Enter' sh "$d" "$pane" </dev/null >/dev/null 2>&1 &
+    else
+      nohup sh -c 'sleep "$1"; "$3" pane send-text "$2" /clear; "$3" pane send-keys "$2" enter' \
+        sh "$d" "$pane" "$herdr" </dev/null >/dev/null 2>&1 &
+    fi ;;
   clear)
-    nohup sh -c 'sleep "$1"; tmux send-keys -t "$2" -l -- "$(cat "$3")"; tmux send-keys -t "$2" Enter
-                 rm -f "$3" "$3.clearing"' sh "$((d + 1))" "$pane" "$req" </dev/null >/dev/null 2>&1 & ;;
+    if [ -z "$herdr" ]; then
+      nohup sh -c 'sleep "$1"; tmux send-keys -t "$2" -l -- "$(cat "$3")"; tmux send-keys -t "$2" Enter
+                   rm -f "$3" "$3.clearing"' sh "$((d + 1))" "$pane" "$req" </dev/null >/dev/null 2>&1 &
+    else
+      nohup sh -c 'sleep "$1"; "$4" pane send-text "$2" "$(cat "$3")"; "$4" pane send-keys "$2" enter
+                   rm -f "$3" "$3.clearing"' sh "$((d + 1))" "$pane" "$req" "$herdr" </dev/null >/dev/null 2>&1 &
+    fi ;;
 esac
 exit 0

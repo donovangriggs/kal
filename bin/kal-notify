@@ -1,5 +1,6 @@
 #!/bin/sh
-# kal-notify MESSAGE: a macOS notification titled "kal", plus a terminal bell in the caller's tmux pane.
+# kal-notify MESSAGE: a macOS notification titled "kal", plus a terminal bell in the caller's tmux pane
+# (in herdr, a herdr toast with its request sound instead).
 # The Orchestrator sends them when a Run finishes, needs the human, or its final review fails.
 # MESSAGE goes to osascript as an argument, never as script text. Tests put a fake `osascript` first on PATH.
 [ $# -eq 1 ] || { echo "usage: kal-notify MESSAGE" >&2; exit 2; }
@@ -8,5 +9,7 @@ osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title 
 if [ -n "$TMUX_PANE" ]; then
   tty=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null)
   [ -n "$tty" ] && printf '\a' > "$tty" 2>/dev/null
+elif [ "${HERDR_ENV:-}" = 1 ]; then
+  "${HERDR_BIN_PATH:-herdr}" notification show kal --body "$1" --sound request >/dev/null 2>&1
 fi
 exit 0

@@ -1,6 +1,6 @@
 # kal
 
-A Claude Code plugin that takes a feature from a loose idea to merged code: interactive planning, then an AFK build by role agents in tmux panes.
+A Claude Code plugin that takes a feature from a loose idea to merged code: interactive planning, then an AFK build by role agents in tmux or herdr panes.
 
 ## Language
 
@@ -31,7 +31,7 @@ The main session driving a Run. It alone writes Run state.
 _Avoid_: lead, manager
 
 **Worker**:
-An agent running one Role on one Ticket in its own tmux pane. It closes when its Report is written.
+An agent running one Role on one Ticket in its own multiplexer pane (tmux or herdr). It closes when its Report is written.
 _Avoid_: subagent, teammate
 
 **Role**:

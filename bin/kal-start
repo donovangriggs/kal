@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+import _mux
 from _kal import commands, dirty, field, git, repo_of, run, stop, tickets
 
 HERE = Path(__file__).resolve().parent
@@ -41,8 +42,9 @@ p.add_argument("--mode", choices=("build", "build-spec"), default="build")
 p.add_argument("--base")
 a = p.parse_args()
 
-if not os.environ.get("TMUX_PANE"):
-    stop(1, "not inside tmux: run `tmux new -A -s kal claude` in this repo and type the command again")
+if not _mux.inside():
+    stop(1, "not inside tmux or herdr: run `tmux new -A -s kal claude` in this repo, or start claude in a herdr pane, "
+            "and type the command again")
 run_dir = a.run_dir.resolve()
 run_dir.mkdir(parents=True, exist_ok=True)
 repo = repo_of(run_dir)
@@ -66,7 +68,7 @@ def active(other):
     if not text or field("Finished", text):
         return False
     panes = [w[2] for t in tickets(other) for w in t.workers if len(w) > 2]
-    if any(run("tmux", "display", "-p", "-t", pane, "#{pane_id}", cwd=repo).stdout.strip() == pane for pane in panes):
+    if any(_mux.alive(pane) for pane in panes):
         return True
     return not (other / "pause").exists() and time.time() - int(field("Heartbeat", text) or 0) < 900
 

@@ -1,6 +1,6 @@
 # kal: plan
 
-A Claude Code plugin that takes a feature from a loose idea to merged code. Planning is interactive (Matt Pocock's skills, reworked). Building is AFK: role agents (ECC's, reworked) run as workers in tmux panes, and a local dashboard shows progress.
+A Claude Code plugin that takes a feature from a loose idea to merged code. Planning is interactive (Matt Pocock's skills, reworked). Building is AFK: role agents (ECC's, reworked) run as workers in tmux or herdr panes, and a local dashboard shows progress.
 
 Goals, in order: **easy to install, easy to use, fast once planning is done.**
 
@@ -17,7 +17,7 @@ PLAN    /kal:pathfinder  or  /kal:interrogate-and-record        interactive, mai
 SPEC    /kal:write-spec  →  /kal:slice-tickets                   interactive, main session
           │  the spec fixes the test seams; tickets carry blocking edges
           ▼
-BUILD   /kal:build <ticket>   or   /kal:build-spec <spec>       AFK, tmux only
+BUILD   /kal:build <ticket>   or   /kal:build-spec <spec>       AFK, tmux or herdr
           │  per ticket: developer → reviewer | qa | security → bug-fixer → merge
           ▼
 FINISH  refine-code → final review | standards | full browser QA → fixes
@@ -38,7 +38,7 @@ claude plugin install kal@kal --scope project        # per repo
 
 `/kal:setup` (from Matt Pocock's setup skill, extended) explores first, proposes, confirms and then writes:
 
-1. **Requirements check:** tmux, git, python3, node (for `npx chrome-devtools-mcp`), Chrome, plus `gh`/`glab` if chosen. Each missing tool gets a one-line fix.
+1. **Requirements check:** tmux or herdr, git, python3, node (for `npx chrome-devtools-mcp`), Chrome, plus `gh`/`glab` if chosen. Each missing tool gets a one-line fix.
 2. **Issue tracker:** GitHub, GitLab, local markdown, or other (Linear, Jira) described in prose. Written to `docs/agents/issue-tracker.md`, including the pathfinder operations for that tracker.
 3. **Labels:** on GitHub/GitLab, creates any that are missing: `ready-for-agent`, `backlog`, `pathfinder:map`, `pathfinder:research`, `pathfinder:prototype`, `pathfinder:interrogate`, `pathfinder:task`.
 4. **Domain docs:** single-context (`GLOSSARY.md` + `docs/adr/`) by default; multi-context only if monorepo signs are found. Written to `docs/agents/domain.md`.
@@ -53,7 +53,7 @@ claude plugin install kal@kal --scope project        # per repo
 6. **`## Agent skills` block** in `CLAUDE.md` (or `AGENTS.md`, whichever exists) pointing at `docs/agents/*`.
 7. **Gitignore** `.kal/`, then commit `.claude/settings.json` and the config so teammates get kal when they clone.
 
-Not inside tmux? Builds refuse to start and print the exact fix: `tmux new -s kal claude`.
+Not inside tmux or herdr? Builds refuse to start and print the exact fix: `tmux new -A -s kal claude`, or start `claude` in a herdr pane.
 
 ---
 
@@ -145,10 +145,10 @@ At: <commit sha>
 
 ## 6. Build runtime
 
-**Only inside tmux.** The orchestrator is your main Claude session. Each worker is an interactive `claude` in its own pane of the orchestrator's tmux window.
+**Only inside tmux or herdr.** The orchestrator is your main Claude session. Each worker is an interactive `claude` in its own pane of the orchestrator's tmux window or herdr tab. `bin/_mux.py` hides which: the backend comes from the caller's env (`TMUX_PANE` first, else `HERDR_ENV=1`), and a pane id's shape (`%12` or `w1:p3`) tells resumes and the Board which one a pane belongs to.
 
 - **Launcher** (`bin/kal-worker`) opens a pane and starts `claude` in the trusted main repo folder (this avoids the folder-trust prompt). The worker gets a brief: the role agent's prompt, plus pointers to the spec, the ticket, its worktree's absolute path, its round folder and its port. It also gets the role's model and tools from the agent's frontmatter.
-- **Pane lifecycle:** the worker's Stop hook signals `tmux wait-for -S kal-done-$TMUX_PANE`, then runs `tmux kill-pane`. The orchestrator runs the launcher as a background command and is notified when it finishes. It never polls and never sleeps.
+- **Pane lifecycle:** the worker's Stop hook signals `tmux wait-for -S kal-done-$TMUX_PANE`, then runs `tmux kill-pane`; in herdr it runs `herdr pane close`, and the pane closing is the signal. The orchestrator runs the launcher as a background command and is notified when it finishes. It never polls and never sleeps.
 - **Watchdog:** a worker with no change to its transcript or reports for 15 minutes, or running 60 minutes in total, is killed and reported as stalled. It's respawned once in the same round. A second stall means the ticket needs you.
 - **Permissions (AFK):** edits, plus an allowlist of the Commands block and safe git commands, plus a PreToolUse **git guard** that blocks `stash`, `reset --hard`, `clean`, `checkout -- …`, `checkout .`/`-f`, `restore` (except `--staged`), `switch -f`, `branch -D`, `commit --amend` and `push -f`/`--force`/`+refspec`. The guard parses commands properly, including `rtk` / `rtk proxy` prefixes, git global options and heredoc bodies, rather than pattern-matching text.
 - **Worktrees:** one per ticket at `<repo>-kal/NN`, branched from the integration branch (`/kal:build-spec`) or the current branch (`/kal:build`). Removed the moment the ticket merges.
@@ -259,7 +259,7 @@ Every created ticket goes to the tracker, the run's graph and the board, where i
   - **Tests and diff:** verify results, files changed, lines added/removed, commits.
 - **The look was decided with `/kal:prototype`:** 3 variants fed by real Run data plus a synthetic mid-run feature. A ("Mission control") won, with empty lanes collapsed so populated ones fit. The variants are kept on the throwaway branch `prototype/board`.
 
-**Notifications:** macOS notifications (`osascript`) when a run finishes, needs you, or its final review fails. Fallback: `tmux display-message`.
+**Notifications:** macOS notifications (`osascript`) when a run finishes, needs you, or its final review fails. Plus a bell in the orchestrator's tmux pane, or a herdr toast.
 
 ---
 
@@ -314,6 +314,7 @@ Each milestone is usable on its own:
 
 ## 16. Status
 
+- 2026-10-26: herdr is an equal alternative to tmux (`bin/_mux.py`). Under herdr, Workers open in an equal-height column right of the orchestrator, labeled by pane title (no role colors); a Worker stuck at a startup prompt is caught in ~5s from herdr's agent status instead of the 45s screen check; the Board shows that status (a `blocked` badge); `kal-notify` uses a herdr toast; `kal-doctor` accepts either.
 - After the first real run (new-zr-web, 13 tickets, 9h44m, 6.5h of it waiting overnight on one ticket's spec conflicts whose recommended options were all accepted), 0.8.0 adds:
   - the **away policy**: measured recommendations are applied as provisional decisions and reviewed at the hand-off;
   - **browser QA that really runs**: `--no-chrome` on workers, the chrome-devtools server warmed at start, QA waits for it, and a `Browser:` line is retried once and then surfaced;

@@ -8,5 +8,5 @@ Run `kal-board` in the repo. It prints the Board's URL: the repo's server if it'
 Then open the URL for the user (`open <url>` on macOS), and tell them:
 
 - It refreshes every 2 seconds by itself, and keeps the run, tab and ticket they're on.
-- It's read-only: the build is steered from tmux.
+- It's read-only: the build is steered from tmux or herdr.
 - To stop the server: `lsof -ti tcp:<port> -sTCP:LISTEN | xargs kill`. The next build or `/kal:board` starts it again on the same URL.

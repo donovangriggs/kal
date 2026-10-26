@@ -3,9 +3,9 @@
     python3 board/state.py <repo>      prints the state as JSON (what /state.json serves)
 
 Sources, all read-only: .kal/runs/<feature>/ (run.md, Ticket mirrors, round folders), git (diff stats, commits),
-tmux (which Worker panes are open) and Worker transcripts (each live Worker's latest action). The timeline comes
-from file times, not log text: kal-worker writes a Worker's brief as it starts, and the Worker's report is written
-as it ends.
+tmux or herdr (which Worker panes are open; herdr also says if a Worker is blocked at a prompt) and Worker
+transcripts (each live Worker's latest action). The timeline comes from file times, not log text: kal-worker writes
+a Worker's brief as it starts, and the Worker's report is written as it ends.
 """
 import json
 import os
@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+import _mux  # noqa: E402
 from _kal import REPORT, Ticket, field, report_field  # noqa: E402
 
 ROLE_OF = {name: role for role, name in REPORT.items()} | {"standards": "reviewer"}
@@ -70,11 +71,11 @@ def filed(text, name="Filed"):
 
 def latest_action(pane):
     """A live Worker's newest tool call, from its transcript (its session id is in the pane's start command)."""
-    m = re.search(r"--session-id (\S+)", sh("tmux", "display", "-p", "-t", pane, "#{pane_start_command}"))
-    if not m:
+    sid = _mux.session_id(pane)
+    if not sid:
         return None
     cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    found = list(cfg.glob(f"projects/*/{m[1]}.jsonl"))
+    found = list(cfg.glob(f"projects/*/{sid}.jsonl"))
     if not found:
         return "starting"
     last = None
@@ -95,7 +96,7 @@ def latest_action(pane):
 
 
 def pane_open(pane):
-    return bool(pane) and sh("tmux", "display", "-p", "-t", pane, "#{pane_id}") == pane
+    return _mux.alive(pane)
 
 
 def ticket_state(t, repo):
@@ -138,10 +139,12 @@ def ticket_state(t, repo):
             diff[key] = int(m[1]) if m else 0
         diff["commits"] = [l.split(" ", 1) for l in sh("git", "log", "--no-merges", "--format=%h %s", rng[1], cwd=cwd).splitlines()]
 
-    workers = [{"role": w[0], "model": w[1] if len(w) > 1 else None, "pane": w[2] if len(w) > 2 else None,
-                "since": w[3] if len(w) > 3 else None,
-                "action": latest_action(w[2]) if len(w) > 2 and pane_open(w[2]) else None,
-                "open": len(w) > 2 and pane_open(w[2])} for w in t.workers]
+    workers = []
+    for w in t.workers:
+        live = len(w) > 2 and pane_open(w[2])
+        workers.append({"role": w[0], "model": w[1] if len(w) > 1 else None, "pane": w[2] if len(w) > 2 else None,
+                        "since": w[3] if len(w) > 3 else None, "action": latest_action(w[2]) if live else None,
+                        "status": _mux.status(w[2]) if live else None, "open": live})
     log = [l.strip() for l in t.text.split("## Log", 1)[-1].split("\n## ", 1)[0].splitlines()
            if re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d ", l.strip())] if "## Log" in t.text else []
     return {"nn": t.nn, "title": t.title, "status": t.status, "size": field("Size", t.text), "round": t.round,

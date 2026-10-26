@@ -4,11 +4,11 @@ A Claude Code plugin that plans a feature with you, then builds it while you're 
 
 You spend your time on decisions: an interview turns your idea into a spec with agreed test seams, then into
 tickets. Then you walk away. Role agents (developer, reviewer, QA, security, bug-fixer, merger) each work in their
-own tmux pane and git worktree. Up to 3 tickets are built at once, everything is checked, and the work lands on
+own tmux (or herdr) pane and git worktree. Up to 3 tickets are built at once, everything is checked, and the work lands on
 an integration branch. A live dashboard shows it all, and nothing reaches your branch until you say so.
 
 ```
-plan with you          →   build AFK in tmux                                      →   you choose how it lands
+plan with you          →   build AFK in tmux or herdr                             →   you choose how it lands
 /kal:interrogate-…         developer → reviewer · qa · security → fix → merge         PR · merge · keep the branch
 /kal:write-spec            × every ticket, 3 at a time, as blockers merge
 /kal:slice-tickets         then: refine → final review · standards · full QA
@@ -22,7 +22,7 @@ plan with you          →   build AFK in tmux                                  
 
 ## Quickstart
 
-**Requirements:** macOS, git, tmux, Python 3.9+ and Claude Code. Node and Google Chrome for browser QA, and `gh` or
+**Requirements:** macOS, git, tmux or [herdr](https://herdr.dev), Python 3.9+ and Claude Code. Node and Google Chrome for browser QA, and `gh` or
 `glab` if your tickets live on GitHub or GitLab.
 
 ```sh
@@ -55,7 +55,8 @@ Then build a feature:
 > /kal:interrogate-and-record       plan it with you (or /kal:pathfinder for something bigger)
 > /kal:write-spec                   offered when the plan is settled
 > /kal:slice-tickets                offered when the spec is written
-tmux new -A -s kal claude           builds run only inside tmux
+tmux new -A -s kal claude           builds run only inside tmux or herdr
+                                    (or in herdr: run herdr, then claude in a pane)
 > /kal:build-spec <spec>            the whole spec, AFK (or /kal:build <ticket> for one)
 ```
 
@@ -76,8 +77,8 @@ get through it. Facts are looked up, not asked.
 
 ## Building
 
-`/kal:build-spec <spec>` runs inside tmux. Your session becomes the **orchestrator** (left pane); every worker gets
-its own pane on the right, colored by role, and closes it when done.
+`/kal:build-spec <spec>` runs inside tmux or herdr. Your session becomes the **orchestrator** (left pane); every worker
+gets its own pane on the right, labeled by role (and colored, in tmux), and closes it when done.
 
 ```
 for each ticket, as soon as its blockers have merged (up to 3 developers at once):
@@ -141,18 +142,18 @@ The Board is kal's live dashboard: one per repo, read-only, at `http://127.0.0.1
 | Lanes | Needs you · Waiting on blockers · Ready · In dev · Checks · Fixing · Merging · Parked · Merged. Each card has a pipeline stepper (dev → checks → fix → merge) with verdicts and rounds, plus badges for blockers, parked waits and discovered tickets |
 | Dependencies | The ticket graph: what's blocked on what, and what can start now |
 | Timeline | Every worker over time, colored by role: where the time went |
-| Right rail | **Live panes** with each worker's latest action, read from its transcript; **findings** by severity; **decided while you were away**; **filed for later**; the activity feed |
+| Right rail | **Live panes** with each worker's latest action, read from its transcript (in herdr, a `blocked` badge when one waits at a prompt); **findings** by severity; **decided while you were away**; **filed for later**; the activity feed |
 | Ticket drawer | Click any card: its steps by round with the full reports, findings, QA screenshots, Verify logs, diff stats, commits and log |
 
 It refreshes every 2 seconds, keeps your place, and serves files only from `.kal/`. You steer the build from
-tmux, not the Board.
+tmux or herdr, not the Board.
 
 ## While a build runs
 
-- **Watch** the orchestrator on the left of the tmux window and the workers on the right, or the Board.
+- **Watch** the orchestrator on the left of the tmux window (herdr tab) and the workers on the right, or the Board.
 - **Pause safely:** run `kal-pause` (e.g. `! kal-pause` in a Claude session in the repo). No new steps start; the
   ones in flight finish and write their reports; it tells you when it's safe to close, update kal or reboot.
-  Don't just close the tmux window: in-flight work is lost.
+  Don't just close the window: in-flight work is lost.
 - **Resume** after a pause, a crash or a closed terminal: run the same `/kal:build-spec` again in a fresh session.
   It picks up from `.kal/runs/<feature>/` and reattaches to any live panes.
 - **Update kal mid-run:** `kal-pause`, then `claude plugin marketplace update kal` and `claude plugin update kal@kal`,
@@ -197,7 +198,7 @@ the fix for each gap.
 |---|---|
 | A build says the folder isn't trusted | Run `claude` in the repo once (without `--dangerously-skip-permissions`) and accept the trust prompt. Workers can't answer it. |
 | A worker reports `blocked: … startup prompt` | Something asked an interactive question at startup. Run `claude` in the repo by hand, answer it once, and retry. |
-| "not inside tmux" | `tmux new -A -s kal claude`, then run the command again. |
+| "not inside tmux or herdr" | `tmux new -A -s kal claude`, or start `claude` in a herdr pane, then run the command again. |
 | A report says `Browser: not run` | QA's Chrome server didn't start. kal retries it once, then reports it at the hand-off. Check `npx` and Google Chrome with `kal-doctor`. |
 | A merge says `flaky Verify passed on retry` | It merged. The flaky test is in `proposals.md`, offered as backlog at the end. |
 | "another run is active" | Pause it (`kal-pause .kal/runs/<other>`) and retry once it says it has stopped. |

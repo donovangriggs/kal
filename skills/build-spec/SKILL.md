@@ -1,6 +1,6 @@
 ---
 name: build-spec
-description: Build a whole spec AFK in tmux. Up to 3 developer workers build tickets in parallel as their blockers merge, each ticket runs the kal pipeline (checks, fixes, merge) into an integration branch, and the end of the spec runs refine-code, a final review, a standards check and full QA before asking how to hand it off. Pauses, resumes, and relays its own context. Invoke only when the user explicitly asks for it or accepts it as the offered next step of another kal skill.
+description: Build a whole spec AFK in tmux or herdr. Up to 3 developer workers build tickets in parallel as their blockers merge, each ticket runs the kal pipeline (checks, fixes, merge) into an integration branch, and the end of the spec runs refine-code, a final review, a standards check and full QA before asking how to hand it off. Pauses, resumes, and relays its own context. Invoke only when the user explicitly asks for it or accepts it as the offered next step of another kal skill.
 argument-hint: "<spec: issue number, URL or path>"
 ---
 

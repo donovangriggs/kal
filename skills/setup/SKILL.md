@@ -31,7 +31,7 @@ Read what's actually there; assume nothing.
 
 ### Requirements check
 
-Run `kal-doctor`. It checks every tool a build needs (git, tmux, python3, node, Chrome, and `gh`/`glab` when the remote points there), Claude Code's folder trust for this repo, and whether kal is enabled here, printing a fix for each gap. Its setup checks (`docs/agents/`, the Commands block, `.kal/` ignored) will fail until this skill has run; that's expected.
+Run `kal-doctor`. It checks every tool a build needs (git, tmux or herdr, python3, node, Chrome, and `gh`/`glab` when the remote points there), Claude Code's folder trust for this repo, and whether kal is enabled here, printing a fix for each gap. Its setup checks (`docs/agents/`, the Commands block, `.kal/` ignored) will fail until this skill has run; that's expected.
 
 A missing tool doesn't stop setup: planning works without any of them. Carry the list of what's missing (and what it blocks) into the summary.
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """kal-doctor [<repo>]: check everything kal needs, and say how to fix what's missing.
 
-One line per check: `ok`, `missing` or `warn`, the check, and the fix. Checks the tools (git, tmux, python3, node
-for browser QA, Chrome, and gh / glab when the repo's remote points there), then the repo: Claude Code's folder
-trust (Workers stop at the trust prompt otherwise), kal enabled for the repo, /kal:setup's output (docs/agents/,
-the Commands block, .kal/ gitignored), and whether this shell is inside tmux. Read-only.
+One line per check: `ok`, `missing` or `warn`, the check, and the fix. Checks the tools (git, tmux or herdr,
+python3, node for browser QA, Chrome, and gh / glab when the repo's remote points there), then the repo: Claude
+Code's folder trust (Workers stop at the trust prompt otherwise), kal enabled for the repo, /kal:setup's output
+(docs/agents/, the Commands block, .kal/ gitignored), and whether this shell is inside tmux or herdr (in herdr,
+also that its server is compatible with the herdr client). Read-only.
 Exit 0 when builds can run; 1 when something they need is missing (planning works either way).
 """
 import json
@@ -39,7 +40,8 @@ top = out("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=
 repo = Path(top).parent if top else repo
 
 check(shutil.which("git"), "git", "xcode-select --install")
-check(shutil.which("tmux"), "tmux (builds run in its panes)", "brew install tmux")
+check(shutil.which("tmux") or shutil.which("herdr"), "tmux or herdr (builds run in its panes)",
+      "brew install tmux (or herdr: brew install herdr)")
 check(sys.version_info >= (3, 9), f"python3 >= 3.9 (found {sys.version.split()[0]})", "brew install python")
 check(shutil.which("npx"), "node / npx (browser QA's chrome-devtools)", "brew install node", need=False)
 chrome = Path("/Applications/Google Chrome.app").exists() or any(shutil.which(c) for c in ("google-chrome", "chromium"))
@@ -69,8 +71,16 @@ else:
     check(bool(commands(repo)["Verify"]), "CLAUDE.md has a Commands block with a Verify command", "run /kal:setup")
     ignored = not subprocess.run(["git", "check-ignore", "-q", ".kal/runs"], cwd=repo).returncode
     check(ignored, ".kal/ is gitignored", "run /kal:setup (or add .kal/ to .gitignore)")
-check(bool(os.environ.get("TMUX")), "this shell is inside tmux (builds need it)",
-      "tmux new -A -s kal claude", need=False)
+mux = "tmux" if os.environ.get("TMUX_PANE") else "herdr" if os.environ.get("HERDR_ENV") == "1" else None
+check(mux, f"this shell is inside {mux or 'tmux or herdr'} (builds need it)",
+      "tmux new -A -s kal claude, or start claude in a herdr pane", need=False)
+if mux == "herdr":
+    try:
+        server = json.loads(out(os.environ.get("HERDR_BIN_PATH") or "herdr", "status", "--json") or "{}")["server"]
+    except (ValueError, KeyError, TypeError):
+        server = {}
+    check(server.get("compatible"), f"herdr's server is compatible with its client (server {server.get('version', '?')})",
+          "restart herdr's server (herdr status shows why)", need=False)
 
 width = max(len(w) for _, w, _ in rows)
 for status, what, fix in rows:

@@ -1,16 +1,16 @@
 ---
 name: build
-description: Build one ticket AFK in tmux. A developer worker builds it test-first, then reviewer, QA and security workers check it in parallel, a bug-fixer handles blocking findings, and it merges into the current branch. Each worker gets its own pane, which closes when it's done. Invoke only when the user explicitly asks for it or accepts it as the offered next step of another kal skill.
+description: Build one ticket AFK in tmux or herdr. A developer worker builds it test-first, then reviewer, QA and security workers check it in parallel, a bug-fixer handles blocking findings, and it merges into the current branch. Each worker gets its own pane, which closes when it's done. Invoke only when the user explicitly asks for it or accepts it as the offered next step of another kal skill.
 argument-hint: "<ticket: issue number, URL or path>"
 ---
 
 Ticket: $ARGUMENTS
 
-You are the **orchestrator** of a **Run** that carries one ticket from ready to merged into the branch the user is on. You coordinate; **workers** do the work, each in its own tmux pane. Vocabulary: `GLOSSARY.md` in the kal plugin.
+You are the **orchestrator** of a **Run** that carries one ticket from ready to merged into the branch the user is on. You coordinate; **workers** do the work, each in its own tmux or herdr pane. Vocabulary: `GLOSSARY.md` in the kal plugin.
 
 ## Standing rules
 
-- **Workers, never subagents.** Start every worker as `kal-worker <role> <ticket file> …` with the Bash tool's `run_in_background: true`. Its first output line is `<pane id> <session id>`. Its completion notification, ending in `done` or `stalled`, means the worker has finished. Never poll a worker and never `sleep`.
+- **Workers, never subagents.** Start every worker as `kal-worker <role> <ticket file> …` with the Bash tool's `run_in_background: true`. Its first output line is `<pane id> <session id>` (pane id `%N` in tmux, `wN:pM` in herdr; pass it on as is). Its completion notification, ending in `done` or `stalled`, means the worker has finished. Never poll a worker and never `sleep`.
 - **You alone write Run state.** Change the ticket mirror and `run.md` only through `kal-set` (and what `kal-begin` / `kal-merge` write). Log exactly one line per transition (`--log "…"`): no progress notes. Run state must be enough to resume from.
 - **Status values:** `in-dev`, `in-review`, `fixing`, `ready-to-merge`, `merging` (a merge is running), `merged`, `parked`, `needs-you`.
 - **The main checkout stays on its branch.** You write only under `.kal/` there, apart from closing the ticket the way the tracker doc says. Never push.

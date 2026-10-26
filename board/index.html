@@ -28,7 +28,7 @@
     --pass: #3fbf6a; --pass-soft: #15291d; --warn: #e3a23a; --warn-soft: #2d2412; --block: #ef5b60; --block-soft: #331718;
     --live: #5b8cff; --live-soft: #172340; --park: #a88bef; --park-soft: #241d36; --idle: #3a414b;
     --shadow: 0 1px 2px rgba(0,0,0,.4); --shadow-lg: 0 16px 50px rgba(0,0,0,.6);
-    /* dark palette: also the tmux pane colors (bin/_kal.py ROLE_COLOR): change both together */
+    /* dark palette: also the tmux pane colors (bin/_kal.py ROLE_COLOR): change both together; herdr has none */
     --dev: #8b85ff; --rev: #3cc2c2; --qa: #f0a43c; --sec: #ef6a8a; --fix: #a88bef; --mrg: #3fbf6a;
   }
 }
@@ -274,6 +274,9 @@ function dur(sec) {
 const since = (s) => isNaN(tm(s)) ? "—" : dur((NOW - tm(s)) / 1000);
 function elapsed(run) { const a = tm(run.started), b = run.finished ? tm(run.finished) : NOW; return isNaN(a) ? "—" : dur((b - a) / 1000); }
 const vclass = (v) => !v ? "" : ["PASS", "READY", "FIXED", "MERGED"].includes(v) ? "pass" : v === "CHANGES" ? "changes" : "stuck";
+// herdr's read of a live Worker (null under tmux): blocked = waiting at a prompt in its pane; working is the norm
+const wstat = (w) => w.status === "blocked" ? `<b class="badge b-red" title="waiting at a prompt: look at pane ${esc(w.pane || "")}">blocked</b> `
+  : w.status === "idle" ? `<b class="chip">idle</b> ` : "";
 const statePill = (s) => `<span class="pill s-${esc(s)}">${STATE_LABEL[s] || esc(s)}</span>`;
 
 /* ---------- data ---------- */
@@ -364,7 +367,7 @@ function card(t, run, sel) {
     <div style="display:flex;gap:5px;margin-top:6px">${t.size ? `<span class="chip">${esc(t.size)}</span>` : ""}${t.diff.files ? `<span class="chip"><span class="plus">+${t.diff.insertions}</span> <span class="minus">−${t.diff.deletions}</span></span>` : ""}</div>
     ${stepper(t)}${badges(t, run)}
     ${t.reason ? `<div class="reason">${esc(t.reason)}</div>` : ""}
-    ${live.length ? `<div class="workers">${live.map((w) => `<div class="wk"><span class="av" style="background:${ROLE_COLOR[w.role] || "var(--muted)"}">${ROLE_SHORT[w.role] || "?"}</span><span>${esc(w.action || w.role)}</span></div>`).join("")}</div>` : ""}
+    ${live.length ? `<div class="workers">${live.map((w) => `<div class="wk"><span class="av" style="background:${ROLE_COLOR[w.role] || "var(--muted)"}">${ROLE_SHORT[w.role] || "?"}</span>${wstat(w)}<span>${esc(w.action || w.role)}</span></div>`).join("")}</div>` : ""}
   </div>`;
 }
 function renderLanes(run) {
@@ -462,7 +465,7 @@ function renderRail(run) {
     <section><h3>Live panes <span>${live.length}</span></h3>
       ${live.length ? live.map((w) => `<div class="pane" data-nn="${esc(w.t.nn)}">
         <div class="r1"><span class="av" style="background:${ROLE_COLOR[w.role] || "var(--muted)"}">${ROLE_SHORT[w.role] || "?"}</span><b>${esc(w.role)}</b><span class="muted" style="font-size:11.5px">${esc(w.model || "")}</span><span class="mono">${esc(w.t.nn)} · ${since(w.since)}</span></div>
-        <div class="act" title="${esc(w.action || "")}">${esc(w.action || "starting…")}</div></div>`).join("") : `<div class="empty-note">No workers running.</div>`}</section>
+        <div class="act" title="${esc(w.action || "")}">${wstat(w)}${esc(w.action || "starting…")}</div></div>`).join("") : `<div class="empty-note">No workers running.</div>`}</section>
     <section><h3>Findings <span>${finds.length}</span></h3>
       ${finds.length ? `<div class="sev">${SEVS.filter((s) => counts[s]).map((s) => `<button class="sevb ${ui.sev === s ? "on" : ""}" data-sev="${s}"><b class="c-${s}">${counts[s]}</b><small class="c-${s}">${s}</small></button>`).join("")}</div>
         <div class="flist">${shown.map((f) => `<div class="find click" data-nn="${esc(f.t.nn)}"><div class="who">${esc(f.t.nn)} · ${esc(f.s.name)} · round ${f.s.round}${f.blocking ? " · blocking" : ""}</div>${esc(f.text)}</div>`).join("")}</div>`
@@ -500,7 +503,7 @@ function drawerHtml(run, t) {
     <h2>${esc(t.nn === "00" ? "End of spec: " + run.feature : t.title)}</h2>
     ${stepper(t)}${badges(t, run, true)}
     ${t.reason ? `<div class="callout ${t.status === "parked" ? "violet" : "red"}">${esc(t.reason)}</div>` : ""}
-    ${live.length ? `<h4>Live now</h4><ul class="plain">${live.map((w) => `<li><b>${esc(w.role)}</b> <span class="muted">${esc(w.model || "")} · pane ${esc(w.pane || "")} · ${since(w.since)}</span><div class="mono muted" style="margin-top:3px">${esc(w.action || "starting…")}</div></li>`).join("")}</ul>` : ""}
+    ${live.length ? `<h4>Live now</h4><ul class="plain">${live.map((w) => `<li><b>${esc(w.role)}</b> <span class="muted">${esc(w.model || "")} · pane ${esc(w.pane || "")} · ${since(w.since)}</span><div class="mono muted" style="margin-top:3px">${wstat(w)}${esc(w.action || "starting…")}</div></li>`).join("")}</ul>` : ""}
     <h4>Steps <span>${t.steps.length}</span></h4>${t.steps.length ? `<table><tr><th>Round</th><th>Worker</th><th>Verdict</th><th>Took</th><th>Outcome</th></tr>
       ${t.steps.map((s) => `<tr><td class="mono">${s.round}</td><td>${esc(s.name)}</td><td><span class="v v-${s.verdict ? vclass(s.verdict) : "live"}">${esc(s.verdict || "running")}</span></td>
         <td class="mono">${s.seconds != null ? dur(s.seconds) : since(s.started)}</td>
@@ -571,7 +574,7 @@ function renderBacklog() {
     : `<div class="hero"><h2>Nothing outstanding</h2><div class="muted">Every ticket in the tracker is done. New ones appear here as soon as they're filed.</div></div>`);
   $("#rail").innerHTML = `<section><h3>How to use this</h3><div class="muted" style="font-size:12.5px;line-height:1.5">
     Every ticket in the tracker that isn't done, whichever Run filed it.<br><br>
-    <b>Ready for an agent</b> or <b>backlog</b>: run the spec's command (copy it from its group) in a Claude session in this repo, inside tmux. A finished spec offers its backlog as a follow-up Run.<br><br>
+    <b>Ready for an agent</b> or <b>backlog</b>: run the spec's command (copy it from its group) in a Claude session in this repo, inside tmux or herdr. A finished spec offers its backlog as a follow-up Run.<br><br>
     <b>Needs a human</b>: kal won't build it; it's yours.<br><br>
     <b>Decisions to make</b>: open tickets on a pathfinder map.</div></section>`;
 }

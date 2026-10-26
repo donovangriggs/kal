@@ -8,7 +8,7 @@
     {
       "name": "kal",
       "source": "./",
-      "description": "Plan features interactively, then build them AFK with role agents in tmux panes.",
+      "description": "Plan features interactively, then build them AFK with role agents in tmux or herdr panes.",
       "category": "development"
     }
   ]
