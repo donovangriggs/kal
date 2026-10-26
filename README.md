@@ -78,7 +78,7 @@ get through it. Facts are looked up, not asked.
 ## Building
 
 `/kal:build-spec <spec>` runs inside tmux or herdr. Your session becomes the **orchestrator** (left pane); every worker
-gets its own pane on the right, labeled by role (and colored, in tmux), and closes it when done.
+gets its own pane on the right, labeled by role and colored (in herdr, by a colored emoji in its label), and closes it when done.
 
 ```
 for each ticket, as soon as its blockers have merged (up to 3 developers at once):

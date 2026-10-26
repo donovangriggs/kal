@@ -23,6 +23,8 @@ QA_BASELINE = 4
 # kal-worker paints each Worker's tmux pane border and title with it.
 ROLE_COLOR = {"developer": "#8b85ff", "reviewer": "#3cc2c2", "qa": "#f0a43c", "security": "#ef6a8a",
               "bug-fixer": "#a88bef", "merger": "#3fbf6a"}  # QA's spare: a baseline server from the base branch's checkout
+# herdr has no pane colors: a Worker's pane label starts with its Role's nearest colored emoji instead.
+ROLE_MARK = {"developer": "🟣", "reviewer": "🔵", "qa": "🟠", "security": "🔴", "bug-fixer": "🟪", "merger": "🟢"}
 COMMAND_KEYS = ("Verify", "Quick check", "Dev server", "Teardown", "Worktree setup")
 
 

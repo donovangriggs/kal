@@ -124,18 +124,19 @@ def _layout():
     return root or {"type": "pane", "pane_id": ""}
 
 
-def split(cmd, env, cwd, title, color):
+def split(cmd, env, cwd, title, color, mark=""):
     """Run the shell command `cmd` in a new pane beside the caller's, without focusing it; returns its pane id. The
     pane gets the multiplexer server's env, not ours: `env` is what it needs. `color` paints the pane's border, and
     its title through @kal_color (the orchestrator's pane has none, so it keeps tmux's default; herdr has no pane
-    colors). The Orchestrator's pane (the window's first) stays on the left, the Workers stacked on the right."""
+    colors, so its label starts with `mark`, an emoji, instead). The Orchestrator's pane (the window's first) stays
+    on the left, the Workers stacked on the right."""
     if BACKEND == "herdr":
         # Workers often start together (reviewer, QA, security): one split at a time per tab, or two would split the
         # same bottom pane and nest the column.
         lock = Path(tempfile.gettempdir(), "kal-split-" + re.sub(r"\W", "-", os.environ["HERDR_TAB_ID"]))
         with open(lock, "w") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
-            return _herdr_split(cmd, env, cwd, title)
+            return _herdr_split(cmd, env, cwd, f"{mark} {title}" if mark else title)
     pane = _tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", caller(), "-c", str(cwd),
                  *(x for k, v in env.items() for x in ("-e", f"{k}={v}")), "sh", "-c", cmd)
     _tmux("select-pane", "-t", pane, "-T", title)
@@ -206,9 +207,15 @@ def alive(pane, title=None):
     return bool(pane) and (shown is None or shown == pane)
 
 
+def _unmark(label):
+    """A herdr label without the Role's emoji in front, so it reads like the tmux title (`01 developer`)."""
+    first, _, rest = label.partition(" ")
+    return rest if rest and not first.isascii() else label
+
+
 def title(pane):
     if is_herdr(pane):
-        return _result("pane", "get", pane).get("pane", {}).get("label") or ""
+        return _unmark(_result("pane", "get", pane).get("pane", {}).get("label") or "")
     return _show(pane, "#{pane_title}") or ""
 
 
@@ -250,7 +257,8 @@ def siblings():
     """[(pane id, title)] for every pane in the caller's window (herdr: tab), the caller's own included."""
     if BACKEND == "herdr":
         panes = _result("pane", "list", "--workspace", os.environ["HERDR_WORKSPACE_ID"]).get("panes", [])
-        return [(p["pane_id"], p.get("label") or "") for p in panes if p.get("tab_id") == os.environ["HERDR_TAB_ID"]]
+        return [(p["pane_id"], _unmark(p.get("label") or "")) for p in panes
+                if p.get("tab_id") == os.environ["HERDR_TAB_ID"]]
     out = _tmux("list-panes", "-t", caller(), "-F", "#{pane_id} #{pane_title}")
     return [tuple(l.split(" ", 1)) for l in out.splitlines() if " " in l]
 

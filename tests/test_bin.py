@@ -728,3 +728,10 @@ class Mux(unittest.TestCase):
             self.assertTrue(self.mux.alive("w1:p3"))
             self.assertTrue(self.mux.alive("%4", "01 developer"))
             self.assertEqual(self.mux.title("%4"), "")
+
+    def test_a_herdr_label_reads_without_its_role_emoji(self):
+        # kal-worker's teardown looks for sibling panes titled `<NN> ...`: the emoji mustn't hide them.
+        self.assertEqual(self.mux._unmark("🟣 01 developer"), "01 developer")
+        self.assertEqual(self.mux._unmark("01 developer"), "01 developer")
+        self.assertEqual(self.mux._unmark("🟢"), "🟢")
+        self.assertEqual(self.mux._unmark(""), "")

@@ -38,7 +38,7 @@ import uuid
 from pathlib import Path
 
 import _mux
-from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROLE_COLOR, ROOT, Ticket, field, kal_loaded, stop, teardown, worktrees
+from _kal import PORT_OFFSET, QA_BASELINE, REPORT, ROLE_COLOR, ROLE_MARK, ROOT, Ticket, field, kal_loaded, stop, teardown, worktrees
 
 NOTE = "A previous attempt at this step crashed or stalled. Read the branch and this round's reports first."
 GUARD = ROOT / "bin" / "_kal_guard.py"
@@ -188,7 +188,7 @@ else:
     if os.environ.get("CLAUDE_CONFIG_DIR"):
         env["CLAUDE_CONFIG_DIR"] = os.environ["CLAUDE_CONFIG_DIR"]
     # The Role's color, as on the Board.
-    pane = _mux.split(cmd, env, t.repo, title, ROLE_COLOR[a.role])
+    pane = _mux.split(cmd, env, t.repo, title, ROLE_COLOR[a.role], ROLE_MARK[a.role])
 print(pane, sid, flush=True)
 
 
