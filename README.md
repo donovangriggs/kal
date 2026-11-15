@@ -1,5 +1,9 @@
 # kal
 
+[![tests](https://github.com/donovangriggs/kal/actions/workflows/tests.yml/badge.svg)](https://github.com/donovangriggs/kal/actions/workflows/tests.yml)
+
+**Status:** v0.9, macOS only. A personal tool I use for my own work, shared as-is: support is best-effort.
+
 A Claude Code plugin that plans a feature with you, then builds it while you're away.
 
 You spend your time on decisions: an interview turns your idea into a spec with agreed test seams, then into
@@ -13,6 +17,12 @@ plan with you          →   build AFK in tmux or herdr                         
 /kal:write-spec            × every ticket, 3 at a time, as blockers merge
 /kal:slice-tickets         then: refine → final review · standards · full QA
 ```
+
+<!-- PLACEHOLDER (captain): Board screenshot or short GIF of a build (tmux/herdr panes + the Board) goes here. -->
+
+## Why kal
+
+<!-- PLACEHOLDER (captain): a short "Why kal" paragraph in your own words goes here. -->
 
 ## Contents
 
@@ -182,9 +192,15 @@ Your full Verify is usually the slowest thing in a build, so kal runs it as rare
 
 ## Safety
 
-- Workers run unattended with `--permission-mode dontAsk`: any shell command, file edits only inside their
-  worktree and the run folder, and no `git push`. A hook blocks destructive git (`stash`, `reset --hard`, `clean`,
-  `checkout --`, `branch -D`, `commit --amend`, force pushes), including through `rtk`.
+**Workers are not sandboxed.** Each one runs unattended with `--permission-mode dontAsk` and a full shell as your
+user: any Bash command can read or write anything your account can. Run kal only on repos you trust, and use a
+throwaway machine or VM for anything you don't.
+
+- Claude's file-edit tools may write only inside the worker's worktree and the run folder, and `git push` is denied.
+  These limits apply to those tools, not to shell commands.
+- A hook blocks destructive git (`stash`, `reset --hard`, `clean`, `checkout --`, `branch -D`, `commit --amend`,
+  force pushes), including through `rtk`. It is a guardrail against slips, not a sandbox: `sh -c`, `eval` and
+  backticks aren't looked into.
 - Workers load only kal's own MCP servers (QA's throwaway Chrome), never your project's or your browser.
 - Nothing reaches your branch until the hand-off, and nothing leaves your machine unless you choose "open a PR".
 - The Board is read-only, bound to `127.0.0.1`, and serves files only from `.kal/`.
@@ -251,4 +267,9 @@ push. Users get it with `claude plugin marketplace update kal` and `claude plugi
 ## Credits
 
 Adapted from [Matt Pocock's skills](https://github.com/mattpocock/skills) and [ECC](https://github.com/affaan-m/ECC),
-both MIT. See [NOTICE](NOTICE). The tmux worker mechanics come from final-boss.
+both MIT. See [NOTICE](NOTICE). The tmux worker mechanics come from an earlier private plugin of mine.
+
+## Support
+
+Best-effort: issues are welcome, with no promise of a fix or a timeline. Security reports: see [SECURITY.md](SECURITY.md).
+Changes: [CHANGELOG.md](CHANGELOG.md).

@@ -1,6 +1,6 @@
 {
   "name": "kal",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Plan features interactively, then build them AFK: spec, tickets, and role agents (developer, reviewer, QA, security, bug-fixer, merger) working in tmux or herdr panes.",
   "author": {
     "name": "Donovan Griggs"

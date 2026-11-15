@@ -4,7 +4,7 @@ A Claude Code plugin that takes a feature from a loose idea to merged code. Plan
 
 Goals, in order: **easy to install, easy to use, fast once planning is done.**
 
-Sources (cloned, gitignored): `reference/mattpocock-skills`, `reference/ecc`. Prior art: `final-boss` (our own plugin), whose design map at `~/.claude/plugins/cache/final-boss/final-boss/0.1.0/.scratch/final-boss/map.md` records why each mechanism exists.
+Sources (cloned, gitignored): `reference/mattpocock-skills`, `reference/ecc`. Prior art: an earlier private plugin of mine, whose design map recorded why each mechanism exists.
 
 ---
 
