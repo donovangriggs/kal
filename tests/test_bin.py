@@ -468,6 +468,7 @@ class Quick(Repo):
             self.assertLess(time.time() - start, 5)
         finally:
             holder.kill()
+            holder.wait()
 
 
 class NoQuick(Repo):
