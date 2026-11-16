@@ -25,9 +25,9 @@ plan with you          →   build AFK in tmux or herdr                         
 ## Why kal
 
 I wanted one senior engineer to be able to cover a whole department. kal gives each AI helper a single job:
-developer, reviewer, QA, security, bug-fixer or merger. Each works in its own copy of the code, up to three at once,
-and they check each other's work. I'm still the gate: nothing ships without my review. To keep that review easy, it
-starts with a spec, then small tickets, with the tests written first.
+developer, reviewer, QA, security, bug-fixer or merger. Each works in its own copy of the code, with up to three
+tickets built at once, and they check each other's work. I'm still the gate: nothing ships without my review. To keep
+that review easy, it starts with a spec, then small tickets, with the tests written first.
 
 ## Contents
 
