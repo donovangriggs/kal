@@ -22,6 +22,10 @@ plan with you          →   build AFK in tmux or herdr                         
 
 *The Board: tickets moving through developer, reviewer, QA and security helpers on a demo project.*
 
+**See it in action:** [kal-demo](https://github.com/donovangriggs/kal-demo) is a Pokédex of the original 151 Pokémon
+(Next.js, PokéAPI, instant search, type matchups, Vitest), built by kal's helpers on 2026-10-21 in about 90 minutes
+across 28 commits. [Live app](https://ai-demo-gules-two.vercel.app).
+
 ## Why kal
 
 I wanted one senior engineer to be able to cover a whole department. kal gives each AI helper a single job:
